@@ -1,0 +1,144 @@
+// Lead Routing App — data model (SQLite for the MVP).
+// All call state is persisted here; nothing critical lives only in memory,
+// because Next.js route handlers are stateless and short-lived.
+//
+// NOTE: SQLite does not support Prisma `enum` blocks, so enum-like columns are
+// stored as String. The allowed values + type-safe unions live in
+// src/lib/enums.ts and are validated at the application layer.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Lead {
+  id     String  @id @default(cuid())
+  name   String
+  phone  String
+  email  String?
+  notes  String?
+  status String  @default("NEW") // LeadStatus
+
+  sourceId String?
+  source   LeadSource? @relation(fields: [sourceId], references: [id])
+
+  attempts   CallAttempt[]
+  activities ActivityLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Agent {
+  id           String    @id @default(cuid())
+  name         String
+  phone        String
+  email        String?
+  status       String    @default("AVAILABLE") // AgentStatus
+  priority     Int       @default(0) // higher wins for PRIORITY strategy
+  skills       String    @default("") // CSV; SQLite has no arrays
+  active       Boolean   @default(true)
+  lastRoutedAt DateTime? // round-robin ordering
+
+  attempts CallAttempt[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CallAttempt {
+  id            String  @id @default(cuid())
+  state         String  @default("PENDING") // CallAttemptState
+  outcome       String? // CallOutcome
+  attemptNumber Int     @default(1) // Nth agent dialed for this lead
+
+  leadId  String
+  lead    Lead   @relation(fields: [leadId], references: [id])
+  agentId String
+  agent   Agent  @relation(fields: [agentId], references: [id])
+
+  // Provider correlation
+  agentCallSid   String?
+  leadCallSid    String?
+  conferenceName String?
+
+  // Simulator scheduling — the "timer" persisted to the DB so transitions
+  // survive across stateless requests.
+  pendingLeg       String? // "agent" | "lead"
+  pendingStatus    String? // e.g. "answered" | "no-answer" | "busy" | "failed" | "completed"
+  nextTransitionAt DateTime?
+
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  durationSec Int?
+
+  activities ActivityLog[]
+
+  @@index([state])
+  @@index([nextTransitionAt])
+  @@index([leadId])
+}
+
+model LeadSource {
+  id              String  @id @default(cuid())
+  name            String  @unique // "website", "facebook", "google-ads"
+  label           String // human-friendly display name
+  enabled         Boolean @default(true)
+  routingStrategy String  @default("ROUND_ROBIN") // RoutingStrategy
+  requiredSkill   String? // default skill requirement for this source
+  priority        Int     @default(0)
+
+  leads Lead[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RoutingRule {
+  id            String  @id @default(cuid())
+  name          String
+  enabled       Boolean @default(true)
+  order         Int     @default(0) // lower = evaluated first
+  sourceName    String? // null = applies to all sources
+  strategy      String  @default("ROUND_ROBIN") // RoutingStrategy
+  requiredSkill String?
+  maxAttempts   Int     @default(3) // agent fallback cap
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled, order])
+}
+
+model BusinessHours {
+  id          String  @id @default(cuid())
+  dayOfWeek   Int     @unique // 0 = Sunday .. 6 = Saturday
+  openMinute  Int     @default(540) // minutes from midnight (09:00)
+  closeMinute Int     @default(1020) // 17:00
+  enabled     Boolean @default(true)
+  timezone    String  @default("UTC")
+}
+
+model ActivityLog {
+  id      String  @id @default(cuid())
+  type    String // ActivityType
+  message String
+  meta    String? // JSON string
+
+  leadId    String?
+  lead      Lead?        @relation(fields: [leadId], references: [id])
+  attemptId String?
+  attempt   CallAttempt? @relation(fields: [attemptId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([leadId])
+}
