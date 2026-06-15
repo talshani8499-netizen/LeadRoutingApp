@@ -73,7 +73,9 @@ Open **Live Calls** and watch the attempt move through
 - **Leads** — every inbound lead and its routing result.
 - **Agents** — availability, priority, skills (drive routing); add/deactivate.
 - **Settings** — Lead Sources, Routing Rules (round-robin / priority /
-  skill-based, with agent-fallback `maxAttempts`), and Business Hours.
+  skill-based, with agent-fallback `maxAttempts`), and Business Hours
+  (per-timezone weekly schedule, overnight windows that wrap past midnight, and
+  a holiday calendar with one-off and recurring closed dates).
 
 ## Architecture
 

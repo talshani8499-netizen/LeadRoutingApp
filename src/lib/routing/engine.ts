@@ -5,7 +5,7 @@ import { env } from "@/lib/env";
 import { logActivity } from "@/lib/activity";
 import { logger, maskPhone } from "@/lib/logger";
 import { getProvider } from "@/lib/telephony";
-import { isWithinBusinessHours } from "./businessHours";
+import { isHoliday, isWithinBusinessHours } from "./businessHours";
 
 export interface RoutingDecision {
   agent: Agent | null;
@@ -75,9 +75,16 @@ export async function routeLead(
     return { agent: null, reason: "lead-not-found", strategy: "ROUND_ROBIN", maxAttempts: 1 };
   }
 
-  // 1) Business hours
+  // 1) Business hours — holidays first, then the weekly schedule.
+  const now = new Date();
   const hours = await prisma.businessHours.findMany();
-  const hoursCheck = isWithinBusinessHours(new Date(), hours);
+  const businessTz = hours[0]?.timezone ?? "UTC";
+  const holidays = await prisma.holiday.findMany();
+  const holidayCheck = isHoliday(now, holidays, businessTz);
+  if (holidayCheck.holiday) {
+    return { agent: null, reason: "holiday", strategy: "ROUND_ROBIN", maxAttempts: 1 };
+  }
+  const hoursCheck = isWithinBusinessHours(now, hours);
   if (!hoursCheck.open) {
     return { agent: null, reason: "outside-business-hours", strategy: "ROUND_ROBIN", maxAttempts: 1 };
   }
@@ -265,6 +272,8 @@ function routingFailureMessage(reason: string): string {
   switch (reason) {
     case "outside-business-hours":
       return "No routing: outside business hours";
+    case "holiday":
+      return "No routing: closed for a holiday";
     case "source-disabled":
       return "No routing: lead source is disabled";
     case "max-attempts-exhausted":
