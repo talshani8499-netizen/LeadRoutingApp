@@ -51,6 +51,9 @@ model Agent {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Hottest routing query filters on active + status on every attempt.
+  @@index([active, status])
 }
 
 model CallAttempt {
@@ -85,6 +88,8 @@ model CallAttempt {
   @@index([state])
   @@index([nextTransitionAt])
   @@index([leadId])
+  @@index([agentId])
+  @@index([outcome])
 }
 
 model LeadSource {

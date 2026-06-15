@@ -18,18 +18,22 @@ export async function PUT(req: NextRequest) {
       { status: 422 },
     );
   }
-  for (const day of parsed.data.days) {
-    await prisma.businessHours.upsert({
-      where: { dayOfWeek: day.dayOfWeek },
-      update: {
-        openMinute: day.openMinute,
-        closeMinute: day.closeMinute,
-        enabled: day.enabled,
-        timezone: day.timezone,
-      },
-      create: day,
-    });
-  }
+  // Upsert the whole week atomically so a mid-loop failure can't leave a
+  // partially-updated schedule.
+  await prisma.$transaction(
+    parsed.data.days.map((day) =>
+      prisma.businessHours.upsert({
+        where: { dayOfWeek: day.dayOfWeek },
+        update: {
+          openMinute: day.openMinute,
+          closeMinute: day.closeMinute,
+          enabled: day.enabled,
+          timezone: day.timezone,
+        },
+        create: day,
+      }),
+    ),
+  );
   const hours = await prisma.businessHours.findMany({ orderBy: { dayOfWeek: "asc" } });
   return NextResponse.json({ ok: true, hours });
 }

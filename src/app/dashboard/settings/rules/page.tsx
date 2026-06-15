@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Badge } from "@/components/Badge";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { strategyLabel } from "@/lib/labels";
 
 interface Rule {
@@ -29,9 +30,17 @@ export default function RulesPage() {
   });
   const [err, setErr] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    const j = await fetch("/api/rules").then((r) => r.json());
-    setRules(j.rules ?? []);
+    try {
+      const res = await fetch("/api/rules");
+      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
+      const j = await res.json();
+      setRules(j.rules ?? []);
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load rules");
+    }
   }, []);
   useEffect(() => {
     load();
@@ -71,9 +80,16 @@ export default function RulesPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Routing Rules</h1>
         <p className="text-sm text-slate-500">
           Evaluated in order (lowest first). The first match for a lead’s source wins. A rule with
-          no source applies to all leads.
+          no source applies to all leads. If a rule requires a skill no available agent has, the
+          lead is marked “No agent available”.
         </p>
       </div>
+
+      {loadError && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 card divide-y divide-slate-100">
@@ -88,18 +104,24 @@ export default function RulesPage() {
                   {r.requiredSkill ? ` · skill: ${r.requiredSkill}` : ""} · ≤{r.maxAttempts} tries
                 </div>
               </div>
-              <button onClick={() => patch(r.id, { enabled: !r.enabled })}>
+              <button
+                onClick={() => patch(r.id, { enabled: !r.enabled })}
+                aria-pressed={r.enabled}
+                title={r.enabled ? "Click to disable" : "Click to enable"}
+              >
                 <Badge
                   label={r.enabled ? "On" : "Off"}
                   cls={r.enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}
                 />
               </button>
-              <button className="text-xs text-red-500 hover:underline" onClick={() => remove(r.id)}>
-                Delete
-              </button>
+              <ConfirmButton label="Delete" confirmLabel="Confirm delete?" onConfirm={() => remove(r.id)} />
             </div>
           ))}
-          {rules.length === 0 && <div className="p-5 text-slate-400 text-sm">No rules.</div>}
+          {rules.length === 0 && (
+            <div className="p-5 text-slate-400 text-sm">
+              No routing rules yet — add one to control how leads are matched to agents.
+            </div>
+          )}
         </div>
 
         <div className="card p-5 h-fit">

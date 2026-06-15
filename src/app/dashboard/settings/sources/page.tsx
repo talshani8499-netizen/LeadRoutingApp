@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Badge } from "@/components/Badge";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { strategyLabel } from "@/lib/labels";
 
 interface Source {
@@ -22,9 +23,17 @@ export default function SourcesPage() {
   const [form, setForm] = useState({ name: "", label: "", routingStrategy: "ROUND_ROBIN", requiredSkill: "" });
   const [err, setErr] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    const j = await fetch("/api/sources").then((r) => r.json());
-    setSources(j.sources ?? []);
+    try {
+      const res = await fetch("/api/sources");
+      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
+      const j = await res.json();
+      setSources(j.sources ?? []);
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load sources");
+    }
   }, []);
   useEffect(() => {
     load();
@@ -63,9 +72,16 @@ export default function SourcesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Lead Sources</h1>
         <p className="text-sm text-slate-500">
-          Where leads come from, and the default routing strategy for each.
+          Where leads come from, and the default routing strategy for each. A strategy here is used
+          unless a Routing Rule matches the lead first.
         </p>
       </div>
+
+      {loadError && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 card divide-y divide-slate-100">
@@ -88,18 +104,24 @@ export default function SourcesPage() {
                   </option>
                 ))}
               </select>
-              <button onClick={() => patch(s.id, { enabled: !s.enabled })}>
+              <button
+                onClick={() => patch(s.id, { enabled: !s.enabled })}
+                aria-pressed={s.enabled}
+                title={s.enabled ? "Click to disable" : "Click to enable"}
+              >
                 <Badge
                   label={s.enabled ? "Enabled" : "Disabled"}
                   cls={s.enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}
                 />
               </button>
-              <button className="text-xs text-red-500 hover:underline" onClick={() => remove(s.id)}>
-                Delete
-              </button>
+              <ConfirmButton label="Delete" confirmLabel="Confirm delete?" onConfirm={() => remove(s.id)} />
             </div>
           ))}
-          {sources.length === 0 && <div className="p-5 text-slate-400 text-sm">No sources.</div>}
+          {sources.length === 0 && (
+            <div className="p-5 text-slate-400 text-sm">
+              No lead sources yet — add one so inbound leads can be tagged and routed.
+            </div>
+          )}
         </div>
 
         <div className="card p-5 h-fit">

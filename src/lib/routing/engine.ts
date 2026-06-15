@@ -3,6 +3,7 @@ import type { RoutingStrategy } from "@/lib/enums";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { logActivity } from "@/lib/activity";
+import { logger, maskPhone } from "@/lib/logger";
 import { getProvider } from "@/lib/telephony";
 import { isWithinBusinessHours } from "./businessHours";
 
@@ -224,24 +225,35 @@ export async function startAttempt(
       message: `Calling agent ${agent.name}…`,
       leadId,
       attemptId: attempt.id,
-      meta: { leg: "agent", to: agent.phone },
+      meta: { leg: "agent", to: maskPhone(agent.phone) },
     });
   } catch (err) {
-    await prisma.callAttempt.update({
-      where: { id: attempt.id },
-      data: { state: "FAILED", outcome: "FAILED", endedAt: new Date() },
+    // Free the agent and finalize the attempt atomically so a placement failure
+    // can never strand the agent BUSY with a stuck PENDING attempt.
+    await prisma.$transaction([
+      prisma.callAttempt.update({
+        where: { id: attempt.id },
+        data: { state: "FAILED", outcome: "FAILED", endedAt: new Date() },
+      }),
+      prisma.agent.updateMany({
+        where: { id: agent.id, status: "BUSY" },
+        data: { status: "AVAILABLE" },
+      }),
+      prisma.lead.update({ where: { id: leadId }, data: { status: "FAILED" } }),
+    ]);
+    // The raw provider error goes to server logs only — not into the
+    // user-visible activity audit trail.
+    logger.error("engine.call_placement_failed", {
+      leadId,
+      attemptId: attempt.id,
+      agentId: agent.id,
+      error: err instanceof Error ? err.message : String(err),
     });
-    await prisma.agent.updateMany({
-      where: { id: agent.id, status: "BUSY" },
-      data: { status: "AVAILABLE" },
-    });
-    await prisma.lead.update({ where: { id: leadId }, data: { status: "FAILED" } });
     await logActivity({
       type: "ROUTING_FAILED",
       message: `Failed to place call to agent ${agent.name}`,
       leadId,
       attemptId: attempt.id,
-      meta: { error: err instanceof Error ? err.message : String(err) },
     });
     return { ok: false, reason: "call-placement-failed", attemptId: attempt.id };
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface Source {
   id: string;
@@ -34,6 +34,7 @@ export function SimulateLead({ onCreated }: { onCreated?: () => void }) {
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -45,6 +46,11 @@ export function SimulateLead({ onCreated }: { onCreated?: () => void }) {
     setName(SAMPLE_NAMES[Math.floor(Math.random() * SAMPLE_NAMES.length)]);
     setPhone(randomPhone());
     setMsg(null);
+    // Move focus into the dialog and close on Escape.
+    firstFieldRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
   async function submit(e: React.FormEvent) {
@@ -87,16 +93,22 @@ export function SimulateLead({ onCreated }: { onCreated?: () => void }) {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
           onClick={() => setOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="simulate-lead-title"
         >
           <div
             className="card w-full max-w-md p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">Simulate an inbound lead</h3>
+              <h3 id="simulate-lead-title" className="text-lg font-semibold">
+                Simulate an inbound lead
+              </h3>
               <button
                 className="text-slate-400 hover:text-slate-600"
                 onClick={() => setOpen(false)}
+                aria-label="Close dialog"
               >
                 ✕
               </button>
@@ -107,16 +119,16 @@ export function SimulateLead({ onCreated }: { onCreated?: () => void }) {
             </p>
             <form onSubmit={submit} className="space-y-3">
               <div>
-                <label className="label">Name</label>
-                <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
+                <label className="label" htmlFor="sim-name">Name</label>
+                <input id="sim-name" ref={firstFieldRef} className="input" value={name} onChange={(e) => setName(e.target.value)} required />
               </div>
               <div>
-                <label className="label">Phone</label>
-                <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} required />
+                <label className="label" htmlFor="sim-phone">Phone</label>
+                <input id="sim-phone" className="input" value={phone} onChange={(e) => setPhone(e.target.value)} required />
               </div>
               <div>
-                <label className="label">Source</label>
-                <select className="input" value={source} onChange={(e) => setSource(e.target.value)}>
+                <label className="label" htmlFor="sim-source">Source</label>
+                <select id="sim-source" className="input" value={source} onChange={(e) => setSource(e.target.value)}>
                   <option value="">Direct (no source)</option>
                   {sources.map((s) => (
                     <option key={s.id} value={s.name}>

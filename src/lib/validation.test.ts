@@ -4,6 +4,8 @@ import {
   normalizePhone,
   businessHoursDaySchema,
   agentCreateSchema,
+  sourceCreateSchema,
+  ruleCreateSchema,
 } from "./validation";
 
 describe("slugify", () => {
@@ -16,9 +18,45 @@ describe("slugify", () => {
 });
 
 describe("boolean coercion", () => {
+  const base = { name: "A", phone: "+15551230000" };
   it("treats the string 'false' as false (not truthy)", () => {
-    expect(agentCreateSchema.parse({ name: "A", phone: "+15551230000", active: "false" }).active).toBe(false);
-    expect(agentCreateSchema.parse({ name: "A", phone: "+15551230000", active: "true" }).active).toBe(true);
+    expect(agentCreateSchema.parse({ ...base, active: "false" }).active).toBe(false);
+    expect(agentCreateSchema.parse({ ...base, active: "true" }).active).toBe(true);
+  });
+  it("handles other falsy/truthy string forms", () => {
+    expect(agentCreateSchema.parse({ ...base, active: "0" }).active).toBe(false);
+    expect(agentCreateSchema.parse({ ...base, active: "no" }).active).toBe(false);
+    expect(agentCreateSchema.parse({ ...base, active: "on" }).active).toBe(true);
+    // omitted -> default true
+    expect(agentCreateSchema.parse(base).active).toBe(true);
+  });
+});
+
+describe("phone validation", () => {
+  const ok = (phone: string) =>
+    agentCreateSchema.safeParse({ name: "A", phone }).success;
+  it("rejects too-short / non-numeric / too-few-digit phones", () => {
+    expect(ok("123")).toBe(false);
+    expect(ok("abc-defg")).toBe(false);
+    expect(ok("().- ()")).toBe(false);
+  });
+  it("accepts common valid formats", () => {
+    expect(ok("+1 (202) 555-0100")).toBe(true);
+    expect(ok("202-555-0100")).toBe(true);
+  });
+});
+
+describe("source + rule schemas", () => {
+  it("enforces the source slug regex", () => {
+    expect(sourceCreateSchema.safeParse({ name: "Facebook Ads", label: "x" }).success).toBe(false);
+    expect(sourceCreateSchema.safeParse({ name: "facebook_ads", label: "x" }).success).toBe(true);
+    expect(sourceCreateSchema.safeParse({ name: "fb-ads", label: "x" }).success).toBe(true);
+  });
+  it("clamps rule maxAttempts and applies defaults", () => {
+    expect(ruleCreateSchema.parse({ name: "R" }).maxAttempts).toBe(3);
+    expect(ruleCreateSchema.safeParse({ name: "R", maxAttempts: 0 }).success).toBe(false);
+    expect(ruleCreateSchema.safeParse({ name: "R", maxAttempts: 11 }).success).toBe(false);
+    expect(ruleCreateSchema.parse({ name: "R", maxAttempts: "5" }).maxAttempts).toBe(5);
   });
 });
 

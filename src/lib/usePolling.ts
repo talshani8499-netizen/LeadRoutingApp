@@ -6,6 +6,7 @@ interface PollingState<T> {
   data: T | null;
   error: string | null;
   loading: boolean;
+  lastUpdated: number | null;
   refresh: () => void;
 }
 
@@ -18,15 +19,18 @@ export function usePolling<T = unknown>(url: string, intervalMs = 2000): Polling
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const active = useRef(true);
 
   const fetchOnce = useCallback(async () => {
     try {
       const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
       if (active.current) {
         setData(json);
         setError(null);
+        setLastUpdated(Date.now());
       }
     } catch (e) {
       if (active.current) setError(e instanceof Error ? e.message : "Request failed");
@@ -45,5 +49,5 @@ export function usePolling<T = unknown>(url: string, intervalMs = 2000): Polling
     };
   }, [fetchOnce, intervalMs]);
 
-  return { data, error, loading, refresh: fetchOnce };
+  return { data, error, loading, lastUpdated, refresh: fetchOnce };
 }

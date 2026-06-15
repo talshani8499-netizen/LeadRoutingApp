@@ -11,6 +11,7 @@ import {
   stateLabel,
 } from "@/lib/routing/stateMachine";
 import { startAttempt } from "@/lib/routing/engine";
+import { maskPhone } from "@/lib/logger";
 import { getProvider } from "./index";
 import type { TelephonyEvent } from "./types";
 
@@ -29,13 +30,24 @@ export async function handleTelephonyEvent(e: TelephonyEvent): Promise<void> {
   // Idempotency / ordering guard: terminal attempts ignore further events.
   if (isTerminal(currentState)) return;
 
+  // Correlate the event to the right call leg. A provider (or a replay) can
+  // deliver a status for a stale/superseded leg; only accept it if the SID
+  // matches the leg we currently track (when a SID is known on both sides).
+  const expectedSid = e.leg === "agent" ? attempt.agentCallSid : attempt.leadCallSid;
+  if (e.providerCallSid && expectedSid && e.providerCallSid !== expectedSid) {
+    return;
+  }
+
   const target = nextState(currentState, e.leg, e.status);
   if (!target) return; // not a valid transition from the current state — no-op
 
-  // Clear the pending simulator transition as we apply this one so it cannot
-  // be re-processed by a concurrent/duplicate tick.
-  await prisma.callAttempt.update({
-    where: { id: attempt.id },
+  // Atomic compare-and-swap: only the caller that observes the row still in
+  // `currentState` performs the transition + side effects. This generalizes the
+  // simulator tick's claim to ALL providers (e.g. Twilio at-least-once delivery
+  // of the same event), preventing double-fired side effects like dialing the
+  // lead twice. Also clears the pending simulator transition.
+  const swapped = await prisma.callAttempt.updateMany({
+    where: { id: attempt.id, state: currentState },
     data: {
       state: target,
       pendingLeg: null,
@@ -43,6 +55,7 @@ export async function handleTelephonyEvent(e: TelephonyEvent): Promise<void> {
       nextTransitionAt: null,
     },
   });
+  if (swapped.count === 0) return; // lost the race; another caller handled it
 
   await logActivity({
     type: "STATE_CHANGED",
@@ -95,7 +108,7 @@ async function onAgentConnected(attempt: AttemptWithRefs): Promise<void> {
     message: `Agent answered — calling lead ${attempt.lead.name}…`,
     leadId: attempt.leadId,
     attemptId: attempt.id,
-    meta: { leg: "lead", to: attempt.lead.phone },
+    meta: { leg: "lead", to: maskPhone(attempt.lead.phone) },
   });
 }
 
@@ -166,37 +179,36 @@ async function finalizeAttempt(
     Math.round((endedAt.getTime() - durationBasis.getTime()) / 1000),
   );
   const outcome = outcomeForState(state);
-
-  await prisma.callAttempt.update({
-    where: { id: attemptId },
-    data: {
-      state,
-      outcome: outcome ?? undefined,
-      endedAt,
-      durationSec,
-      pendingLeg: null,
-      pendingStatus: null,
-      nextTransitionAt: null,
-    },
-  });
-
-  // Release the agent back to the pool (unless they were taken offline).
-  const agent = await prisma.agent.findUnique({ where: { id: attempt.agentId } });
-  if (agent && agent.status !== "OFFLINE") {
-    await prisma.agent.update({
-      where: { id: attempt.agentId },
-      data: { status: "AVAILABLE" },
-    });
-  }
-
-  // Update the lead only for lead-facing terminal states (an agent no-answer
-  // keeps the lead in-progress while fallback continues).
   const leadStatus = leadStatusForState(state);
+
+  // Finalize atomically: marking the attempt terminal, releasing the agent, and
+  // (for lead-facing states) updating the lead must all land together. A crash
+  // between these previously could strand an agent BUSY forever. The agent free
+  // is conditional so we never resurrect an agent who was taken OFFLINE.
+  await prisma.$transaction([
+    prisma.callAttempt.update({
+      where: { id: attemptId },
+      data: {
+        state,
+        outcome: outcome ?? undefined,
+        endedAt,
+        durationSec,
+        pendingLeg: null,
+        pendingStatus: null,
+        nextTransitionAt: null,
+      },
+    }),
+    prisma.agent.updateMany({
+      where: { id: attempt.agentId, status: { not: "OFFLINE" } },
+      data: { status: "AVAILABLE" },
+    }),
+    ...(leadStatus
+      ? [prisma.lead.update({ where: { id: attempt.leadId }, data: { status: leadStatus } })]
+      : []),
+  ]);
+
+  // Audit the lead-facing terminal outcome.
   if (leadStatus) {
-    await prisma.lead.update({
-      where: { id: attempt.leadId },
-      data: { status: leadStatus },
-    });
     await logActivity({
       type: "CALL_COMPLETED",
       message:

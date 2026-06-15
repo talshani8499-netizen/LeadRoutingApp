@@ -8,7 +8,7 @@ export const leadStatusMeta: Record<string, { label: string; cls: string }> = {
   IN_PROGRESS: { label: "In progress", cls: "bg-blue-100 text-blue-700" },
   CONNECTED: { label: "Connected", cls: "bg-emerald-100 text-emerald-700" },
   NO_ANSWER: { label: "No answer", cls: "bg-orange-100 text-orange-700" },
-  BUSY: { label: "Busy", cls: "bg-yellow-100 text-yellow-700" },
+  BUSY: { label: "Busy", cls: "bg-yellow-100 text-yellow-800" },
   FAILED: { label: "Failed", cls: "bg-red-100 text-red-700" },
   NO_AGENT_AVAILABLE: { label: "No agent", cls: "bg-rose-100 text-rose-700" },
 };
@@ -21,7 +21,7 @@ export const callStateMeta: Record<string, { label: string; cls: string; live?: 
   BRIDGED: { label: "In conversation", cls: "bg-emerald-100 text-emerald-700", live: true },
   COMPLETED: { label: "Connected", cls: "bg-emerald-100 text-emerald-700" },
   NO_ANSWER: { label: "No answer", cls: "bg-orange-100 text-orange-700" },
-  BUSY: { label: "Busy", cls: "bg-yellow-100 text-yellow-700" },
+  BUSY: { label: "Busy", cls: "bg-yellow-100 text-yellow-800" },
   FAILED: { label: "Failed", cls: "bg-red-100 text-red-700" },
   AGENT_NO_ANSWER: { label: "Agent no answer", cls: "bg-orange-100 text-orange-700" },
   CANCELLED: { label: "No agent", cls: "bg-rose-100 text-rose-700" },
@@ -36,7 +36,7 @@ export const agentStatusMeta: Record<string, { label: string; cls: string }> = {
 export const outcomeMeta: Record<string, { label: string; cls: string }> = {
   CONNECTED: { label: "Connected", cls: "bg-emerald-100 text-emerald-700" },
   NO_ANSWER: { label: "No answer", cls: "bg-orange-100 text-orange-700" },
-  BUSY: { label: "Busy", cls: "bg-yellow-100 text-yellow-700" },
+  BUSY: { label: "Busy", cls: "bg-yellow-100 text-yellow-800" },
   FAILED: { label: "Failed", cls: "bg-red-100 text-red-700" },
 };
 

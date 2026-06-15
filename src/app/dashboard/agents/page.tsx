@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Badge } from "@/components/Badge";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { agentStatusMeta } from "@/lib/labels";
 
 interface Agent {
@@ -24,10 +25,19 @@ export default function AgentsPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    const j = await fetch("/api/agents").then((r) => r.json());
-    setAgents(j.agents ?? []);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/agents");
+      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
+      const j = await res.json();
+      setAgents(j.agents ?? []);
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load agents");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -72,14 +82,25 @@ export default function AgentsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
         <p className="text-sm text-slate-500">
-          Availability, priority and skills feed directly into the routing engine.
+          Availability, priority and skills feed directly into the routing engine. Higher priority
+          is dialed first under the Priority strategy.
         </p>
       </div>
 
+      {loadError && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 card overflow-hidden">
+        <div className="lg:col-span-2 card overflow-x-auto">
           {loading ? (
             <div className="p-6 text-slate-400">Loading…</div>
+          ) : agents.length === 0 ? (
+            <div className="p-6 text-slate-400 text-sm">
+              No agents yet — add your first agent using the form.
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-500">
@@ -133,12 +154,11 @@ export default function AgentsPage() {
                       </td>
                       <td className="px-5 py-3 text-right">
                         {a.active ? (
-                          <button
-                            className="text-xs text-red-500 hover:underline"
-                            onClick={() => remove(a.id)}
-                          >
-                            Deactivate
-                          </button>
+                          <ConfirmButton
+                            label="Deactivate"
+                            confirmLabel="Confirm?"
+                            onConfirm={() => remove(a.id)}
+                          />
                         ) : (
                           <button
                             className="text-xs text-brand-600 hover:underline"

@@ -2,6 +2,7 @@
 
 import { usePolling } from "@/lib/usePolling";
 import { formatDuration } from "@/lib/labels";
+import { StaleBanner } from "@/components/StaleBanner";
 import type { DashboardMetrics } from "@/lib/analytics";
 
 interface Resp {
@@ -34,13 +35,19 @@ function Kpi({ label, value, sub }: { label: string; value: string | number; sub
 }
 
 export default function OverviewPage() {
-  const { data, loading } = usePolling<Resp>("/api/analytics", 2500);
+  const { data, loading, error, lastUpdated } = usePolling<Resp>("/api/analytics", 2500);
   const m = data?.metrics;
 
   if (loading && !m) {
     return <div className="text-slate-400">Loading dashboard…</div>;
   }
-  if (!m) return null;
+  if (!m) {
+    return (
+      <div className="card p-6 text-sm text-red-600">
+        Couldn’t load dashboard data. {error ?? ""}
+      </div>
+    );
+  }
 
   const outcomeTotal =
     m.outcomes.CONNECTED + m.outcomes.NO_ANSWER + m.outcomes.BUSY + m.outcomes.FAILED;
@@ -51,6 +58,8 @@ export default function OverviewPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
         <p className="text-sm text-slate-500">Real-time routing performance and call outcomes.</p>
       </div>
+
+      <StaleBanner error={error} lastUpdated={lastUpdated} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Kpi label="Leads today" value={m.totals.leadsToday} sub={`${m.totals.leads} total`} />

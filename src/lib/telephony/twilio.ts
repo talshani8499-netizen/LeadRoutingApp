@@ -51,6 +51,47 @@ export function mapTwilioStatus(twilioStatus: string): TelephonyStatus {
   }
 }
 
+/**
+ * Validate a Twilio webhook request's X-Twilio-Signature.
+ *
+ * Twilio signs the full request URL concatenated with the POST params (sorted
+ * by key, joined as key+value) using HMAC-SHA1 keyed by the account auth token,
+ * base64-encoded. We recompute it and constant-time compare. Implemented with
+ * Web Crypto so it works in any runtime without a node: import.
+ */
+export async function isValidTwilioSignature(
+  authToken: string,
+  signature: string,
+  url: string,
+  params: Record<string, string>,
+): Promise<boolean> {
+  if (!authToken || !signature) return false;
+  const data =
+    url +
+    Object.keys(params)
+      .sort()
+      .map((k) => k + params[k])
+      .join("");
+
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(authToken),
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(data));
+  const expected = btoa(String.fromCharCode(...new Uint8Array(mac)));
+
+  if (expected.length !== signature.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < expected.length; i++) {
+    mismatch |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 /** TwiML that drops a leg into the shared per-attempt conference room. */
 export function conferenceTwiML(conferenceName: string): string {
   return [

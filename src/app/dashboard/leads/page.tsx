@@ -2,6 +2,7 @@
 
 import { usePolling } from "@/lib/usePolling";
 import { Badge } from "@/components/Badge";
+import { StaleBanner } from "@/components/StaleBanner";
 import { leadStatusMeta, timeAgo } from "@/lib/labels";
 
 interface Lead {
@@ -21,7 +22,7 @@ interface Resp {
 }
 
 export default function LeadsPage() {
-  const { data, loading } = usePolling<Resp>("/api/leads", 3000);
+  const { data, loading, error, lastUpdated } = usePolling<Resp>("/api/leads", 3000);
   const leads = data?.leads ?? [];
 
   return (
@@ -31,6 +32,8 @@ export default function LeadsPage() {
         <p className="text-sm text-slate-500">Every inbound lead and its routing outcome.</p>
       </div>
 
+      <StaleBanner error={error} lastUpdated={lastUpdated} />
+
       {loading && !data ? (
         <div className="text-slate-400">Loading…</div>
       ) : leads.length === 0 ? (
@@ -38,7 +41,7 @@ export default function LeadsPage() {
           No leads yet. Use “Simulate lead” to create one.
         </div>
       ) : (
-        <div className="card overflow-hidden">
+        <div className="card overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500">
               <tr>

@@ -2,6 +2,7 @@
 
 import { usePolling } from "@/lib/usePolling";
 import { Badge } from "@/components/Badge";
+import { StaleBanner } from "@/components/StaleBanner";
 import { callStateMeta, outcomeMeta, formatDuration, timeAgo } from "@/lib/labels";
 
 interface Attempt {
@@ -90,7 +91,7 @@ function CallCard({ a }: { a: Attempt }) {
 
 export default function ActivityPage() {
   // 1.5s poll: also advances the simulator on each tick.
-  const { data, loading } = usePolling<Resp>("/api/calls/active", 1500);
+  const { data, loading, error, lastUpdated } = usePolling<Resp>("/api/calls/active", 1500);
   const active = data?.active ?? [];
   const recent = data?.recent ?? [];
 
@@ -110,6 +111,8 @@ export default function ActivityPage() {
           </span>
         )}
       </div>
+
+      <StaleBanner error={error} lastUpdated={lastUpdated} />
 
       {loading && !data ? (
         <div className="text-slate-400">Loading…</div>
