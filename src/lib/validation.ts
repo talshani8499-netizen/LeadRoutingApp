@@ -1,5 +1,28 @@
 import { z } from "zod";
 
+// Robust boolean coercion. z.coerce.boolean() treats any non-empty string as
+// true, so the string "false" would become true — a footgun for API clients.
+// This maps the common string forms correctly.
+const boolish = z.preprocess((v) => {
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    if (["false", "0", "no", "off", ""].includes(s)) return false;
+    if (["true", "1", "yes", "on"].includes(s)) return true;
+  }
+  return v;
+}, z.boolean());
+
+/** Normalize a free-text source name into a safe slug for LeadSource.name. */
+export function slugify(raw: string): string {
+  return (
+    raw
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "source"
+  );
+}
+
 // Phone validation: accept common formats, normalize to E.164-ish.
 // We are deliberately lenient (SMB forms are messy) but require enough digits.
 const phoneSchema = z
@@ -38,7 +61,7 @@ export const agentCreateSchema = z.object({
   priority: z.coerce.number().int().min(0).max(100).default(0),
   skills: z.string().trim().max(300).default(""),
   status: z.enum(["AVAILABLE", "BUSY", "OFFLINE"]).default("AVAILABLE"),
-  active: z.coerce.boolean().default(true),
+  active: boolish.default(true),
 });
 
 export const agentUpdateSchema = agentCreateSchema.partial();
@@ -52,7 +75,7 @@ export const sourceCreateSchema = z.object({
     .max(60)
     .regex(/^[a-z0-9-_]+$/, "Use lowercase letters, numbers, dashes"),
   label: z.string().trim().min(1).max(120),
-  enabled: z.coerce.boolean().default(true),
+  enabled: boolish.default(true),
   routingStrategy: z.enum(["ROUND_ROBIN", "PRIORITY", "SKILL_BASED"]).default("ROUND_ROBIN"),
   requiredSkill: z.string().trim().max(60).optional().or(z.literal("").transform(() => undefined)),
   priority: z.coerce.number().int().min(0).max(100).default(0),
@@ -63,7 +86,7 @@ export const sourceUpdateSchema = sourceCreateSchema.partial();
 // Routing rule CRUD
 export const ruleCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
-  enabled: z.coerce.boolean().default(true),
+  enabled: boolish.default(true),
   order: z.coerce.number().int().min(0).default(0),
   sourceName: z.string().trim().max(60).optional().or(z.literal("").transform(() => undefined)),
   strategy: z.enum(["ROUND_ROBIN", "PRIORITY", "SKILL_BASED"]).default("ROUND_ROBIN"),
@@ -74,13 +97,20 @@ export const ruleCreateSchema = z.object({
 export const ruleUpdateSchema = ruleCreateSchema.partial();
 
 // Business hours (one row per day)
-export const businessHoursDaySchema = z.object({
-  dayOfWeek: z.coerce.number().int().min(0).max(6),
-  openMinute: z.coerce.number().int().min(0).max(1440),
-  closeMinute: z.coerce.number().int().min(0).max(1440),
-  enabled: z.coerce.boolean(),
-  timezone: z.string().trim().min(1).max(60).default("UTC"),
-});
+export const businessHoursDaySchema = z
+  .object({
+    dayOfWeek: z.coerce.number().int().min(0).max(6),
+    openMinute: z.coerce.number().int().min(0).max(1440),
+    closeMinute: z.coerce.number().int().min(0).max(1440),
+    enabled: boolish,
+    timezone: z.string().trim().min(1).max(60).default("UTC"),
+  })
+  // An enabled day must have a positive-length window; otherwise the day would
+  // silently evaluate as closed all day. (Overnight windows aren't supported.)
+  .refine((d) => !d.enabled || d.openMinute < d.closeMinute, {
+    message: "Opening time must be before closing time",
+    path: ["closeMinute"],
+  });
 
 export const businessHoursUpdateSchema = z.object({
   days: z.array(businessHoursDaySchema).max(7),

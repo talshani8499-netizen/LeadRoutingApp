@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { dispatchLead } from "@/lib/routing/engine";
-import { leadIntakeSchema, normalizePhone } from "@/lib/validation";
+import { leadIntakeSchema, normalizePhone, slugify } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +28,10 @@ export async function POST(req: NextRequest) {
   // Resolve the lead source (auto-create unknown sources so no lead is lost).
   let sourceId: string | undefined;
   if (data.source) {
-    const slug = data.source.toLowerCase().trim();
+    const slug = slugify(data.source);
     const source = await prisma.leadSource.upsert({
       where: { name: slug },
-      update: {},
+      update: { label: data.source },
       create: { name: slug, label: data.source, enabled: true },
     });
     sourceId = source.id;

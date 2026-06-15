@@ -104,7 +104,7 @@ async function onBridged(attempt: AttemptWithRefs): Promise<void> {
   const conferenceName = `room-${attempt.id}`;
   await prisma.callAttempt.update({
     where: { id: attempt.id },
-    data: { conferenceName },
+    data: { conferenceName, bridgedAt: new Date() },
   });
   const provider = getProvider();
   await provider.bridge({
@@ -158,9 +158,12 @@ async function finalizeAttempt(
   if (!attempt) return;
 
   const endedAt = new Date();
+  // Talk time is measured from when the legs were bridged (for a connected
+  // call); without a bridge it falls back to the whole attempt duration.
+  const durationBasis = attempt.bridgedAt ?? attempt.startedAt;
   const durationSec = Math.max(
     0,
-    Math.round((endedAt.getTime() - attempt.startedAt.getTime()) / 1000),
+    Math.round((endedAt.getTime() - durationBasis.getTime()) / 1000),
   );
   const outcome = outcomeForState(state);
 

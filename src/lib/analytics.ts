@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { ACTIVE_CALL_STATES } from "@/lib/enums";
 
 // Dashboard aggregations. Kept as a single module so the overview page and the
 // /api/analytics route share one source of truth.
@@ -35,14 +36,6 @@ const startOfToday = (): Date => {
 };
 
 export async function getDashboardMetrics(): Promise<DashboardMetrics> {
-  const ACTIVE_STATES = [
-    "PENDING",
-    "AGENT_RINGING",
-    "AGENT_CONNECTED",
-    "LEAD_RINGING",
-    "BRIDGED",
-  ] as const;
-
   const [
     leads,
     leadsToday,
@@ -51,31 +44,35 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     activeCalls,
     outcomeGroups,
     statusGroups,
-    connectedAttempts,
-    agentsWithAttempts,
+    talkAgg,
+    attemptsByAgent,
+    connectedByAgent,
+    agentRows,
   ] = await Promise.all([
     prisma.lead.count(),
     prisma.lead.count({ where: { createdAt: { gte: startOfToday() } } }),
     prisma.agent.count(),
     prisma.agent.count({ where: { status: "AVAILABLE", active: true } }),
-    prisma.callAttempt.count({ where: { state: { in: [...ACTIVE_STATES] } } }),
+    prisma.callAttempt.count({ where: { state: { in: ACTIVE_CALL_STATES } } }),
     prisma.callAttempt.groupBy({
       by: ["outcome"],
       _count: { _all: true },
       where: { outcome: { not: null } },
     }),
     prisma.lead.groupBy({ by: ["status"], _count: { _all: true } }),
-    prisma.callAttempt.findMany({
+    // Average talk time computed in the DB (ignores null durations).
+    prisma.callAttempt.aggregate({
+      _avg: { durationSec: true },
       where: { outcome: "CONNECTED" },
-      select: { durationSec: true },
     }),
-    prisma.agent.findMany({
-      select: {
-        id: true,
-        name: true,
-        attempts: { select: { outcome: true } },
-      },
+    // Leaderboard via grouped counts rather than loading every attempt row.
+    prisma.callAttempt.groupBy({ by: ["agentId"], _count: { _all: true } }),
+    prisma.callAttempt.groupBy({
+      by: ["agentId"],
+      _count: { _all: true },
+      where: { outcome: "CONNECTED" },
     }),
+    prisma.agent.findMany({ select: { id: true, name: true } }),
   ]);
 
   const outcomes = { CONNECTED: 0, NO_ANSWER: 0, BUSY: 0, FAILED: 0 };
@@ -89,25 +86,21 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     outcomes.CONNECTED + outcomes.NO_ANSWER + outcomes.BUSY + outcomes.FAILED;
   const connectRate = totalOutcomes > 0 ? outcomes.CONNECTED / totalOutcomes : 0;
 
-  const talkTimes = connectedAttempts
-    .map((a) => a.durationSec ?? 0)
-    .filter((n) => n > 0);
-  const avgTalkTimeSec =
-    talkTimes.length > 0
-      ? Math.round(talkTimes.reduce((s, n) => s + n, 0) / talkTimes.length)
-      : 0;
+  const avgTalkTimeSec = Math.round(talkAgg._avg.durationSec ?? 0);
 
   const leadStatus: Record<string, number> = {};
   for (const g of statusGroups) {
     leadStatus[g.status] = g._count._all;
   }
 
-  const agentLeaderboard = agentsWithAttempts
+  const attemptCount = new Map(attemptsByAgent.map((g) => [g.agentId, g._count._all]));
+  const connectedCount = new Map(connectedByAgent.map((g) => [g.agentId, g._count._all]));
+  const agentLeaderboard = agentRows
     .map((a) => ({
       id: a.id,
       name: a.name,
-      attempts: a.attempts.length,
-      connected: a.attempts.filter((t) => t.outcome === "CONNECTED").length,
+      attempts: attemptCount.get(a.id) ?? 0,
+      connected: connectedCount.get(a.id) ?? 0,
     }))
     .sort((a, b) => b.connected - a.connected || b.attempts - a.attempts)
     .slice(0, 8);

@@ -32,6 +32,16 @@ export async function runSimTick(): Promise<{ applied: number }> {
     const providerCallSid =
       (leg === "agent" ? attempt.agentCallSid : attempt.leadCallSid) ?? `sim-${attempt.id}`;
 
+    // Atomically claim this transition so overlapping ticks (a poll racing the
+    // in-process ticker, or two concurrent polls) cannot both process it and
+    // double-fire side effects such as dialing the lead twice. Only the tick
+    // that wins the conditional update proceeds.
+    const claim = await prisma.callAttempt.updateMany({
+      where: { id: attempt.id, nextTransitionAt: { not: null, lte: now } },
+      data: { nextTransitionAt: null },
+    });
+    if (claim.count === 0) continue;
+
     await handleTelephonyEvent({
       attemptId: attempt.id,
       providerCallSid,

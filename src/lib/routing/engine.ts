@@ -169,7 +169,20 @@ export async function startAttempt(
 
   const agent = decision.agent;
 
-  // Create the attempt and reserve the agent atomically-ish.
+  // Reserve the agent atomically: only succeeds if they are still AVAILABLE.
+  // This closes the read-then-write race where two concurrent leads both see
+  // the same AVAILABLE agent — the loser gets count 0 and re-routes.
+  const reserved = await prisma.agent.updateMany({
+    where: { id: agent.id, status: "AVAILABLE" },
+    data: { status: "BUSY", lastRoutedAt: new Date() },
+  });
+  if (reserved.count === 0) {
+    return startAttempt(leadId, {
+      excludeAgentIds: [...(opts.excludeAgentIds ?? []), agent.id],
+      attemptNumber,
+    });
+  }
+
   const attempt = await prisma.callAttempt.create({
     data: {
       leadId,
@@ -177,10 +190,6 @@ export async function startAttempt(
       attemptNumber,
       state: "PENDING",
     },
-  });
-  await prisma.agent.update({
-    where: { id: agent.id },
-    data: { status: "BUSY", lastRoutedAt: new Date() },
   });
   await prisma.lead.update({
     where: { id: leadId },
@@ -194,25 +203,48 @@ export async function startAttempt(
     meta: { agentId: agent.id, strategy: decision.strategy, attemptNumber },
   });
 
-  // Step 5: call the agent first.
-  const provider = getProvider();
-  const { providerCallSid } = await provider.callAgent({
-    attemptId: attempt.id,
-    leg: "agent",
-    to: agent.phone,
-    from: env.platformCallerId,
-  });
-  await prisma.callAttempt.update({
-    where: { id: attempt.id },
-    data: { state: "AGENT_RINGING", agentCallSid: providerCallSid },
-  });
-  await logActivity({
-    type: "CALL_PLACED",
-    message: `Calling agent ${agent.name}…`,
-    leadId,
-    attemptId: attempt.id,
-    meta: { leg: "agent", to: agent.phone },
-  });
+  // Step 5: call the agent first. If the provider fails to place the call, we
+  // must release the agent and finalize the attempt — otherwise the agent is
+  // stranded BUSY and the attempt sits in PENDING forever (no event ever
+  // advances it).
+  try {
+    const provider = getProvider();
+    const { providerCallSid } = await provider.callAgent({
+      attemptId: attempt.id,
+      leg: "agent",
+      to: agent.phone,
+      from: env.platformCallerId,
+    });
+    await prisma.callAttempt.update({
+      where: { id: attempt.id },
+      data: { state: "AGENT_RINGING", agentCallSid: providerCallSid },
+    });
+    await logActivity({
+      type: "CALL_PLACED",
+      message: `Calling agent ${agent.name}…`,
+      leadId,
+      attemptId: attempt.id,
+      meta: { leg: "agent", to: agent.phone },
+    });
+  } catch (err) {
+    await prisma.callAttempt.update({
+      where: { id: attempt.id },
+      data: { state: "FAILED", outcome: "FAILED", endedAt: new Date() },
+    });
+    await prisma.agent.updateMany({
+      where: { id: agent.id, status: "BUSY" },
+      data: { status: "AVAILABLE" },
+    });
+    await prisma.lead.update({ where: { id: leadId }, data: { status: "FAILED" } });
+    await logActivity({
+      type: "ROUTING_FAILED",
+      message: `Failed to place call to agent ${agent.name}`,
+      leadId,
+      attemptId: attempt.id,
+      meta: { error: err instanceof Error ? err.message : String(err) },
+    });
+    return { ok: false, reason: "call-placement-failed", attemptId: attempt.id };
+  }
 
   return { ok: true, attemptId: attempt.id, reason: "agent-selected" };
 }
