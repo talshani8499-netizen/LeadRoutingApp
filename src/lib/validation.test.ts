@@ -6,6 +6,7 @@ import {
   agentCreateSchema,
   sourceCreateSchema,
   ruleCreateSchema,
+  holidayCreateSchema,
 } from "./validation";
 
 describe("slugify", () => {
@@ -61,17 +62,33 @@ describe("source + rule schemas", () => {
 });
 
 describe("business hours validation", () => {
-  it("rejects an enabled day where open is not before close", () => {
+  it("allows an overnight window (close before open)", () => {
     expect(
-      businessHoursDaySchema.safeParse({ dayOfWeek: 1, openMinute: 1020, closeMinute: 540, enabled: true })
+      businessHoursDaySchema.safeParse({ dayOfWeek: 1, openMinute: 1320, closeMinute: 120, enabled: true })
+        .success,
+    ).toBe(true);
+  });
+  it("rejects an enabled day where open equals close (ambiguous)", () => {
+    expect(
+      businessHoursDaySchema.safeParse({ dayOfWeek: 1, openMinute: 540, closeMinute: 540, enabled: true })
         .success,
     ).toBe(false);
   });
   it("allows a disabled day regardless of times", () => {
     expect(
-      businessHoursDaySchema.safeParse({ dayOfWeek: 1, openMinute: 1020, closeMinute: 540, enabled: false })
+      businessHoursDaySchema.safeParse({ dayOfWeek: 1, openMinute: 540, closeMinute: 540, enabled: false })
         .success,
     ).toBe(true);
+  });
+});
+
+describe("holiday validation", () => {
+  it("accepts a valid YYYY-MM-DD date", () => {
+    expect(holidayCreateSchema.safeParse({ date: "2026-12-25", name: "Christmas" }).success).toBe(true);
+  });
+  it("rejects malformed or impossible dates", () => {
+    expect(holidayCreateSchema.safeParse({ date: "12/25/2026", name: "x" }).success).toBe(false);
+    expect(holidayCreateSchema.safeParse({ date: "2026-13-40", name: "x" }).success).toBe(false);
   });
 });
 

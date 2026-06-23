@@ -127,9 +127,21 @@ model BusinessHours {
   id          String  @id @default(cuid())
   dayOfWeek   Int     @unique // 0 = Sunday .. 6 = Saturday
   openMinute  Int     @default(540) // minutes from midnight (09:00)
-  closeMinute Int     @default(1020) // 17:00
+  closeMinute Int     @default(1020) // 17:00; if <= openMinute the window is overnight (wraps past midnight)
   enabled     Boolean @default(true)
   timezone    String  @default("UTC")
+}
+
+model Holiday {
+  id        String   @id @default(cuid())
+  // Calendar date the business is closed. For non-recurring holidays the full
+  // YYYY-MM-DD is matched; for recurring ones only month-day is matched.
+  date      String // "YYYY-MM-DD"
+  name      String
+  recurring Boolean  @default(false) // repeats every year on the same month/day
+  createdAt DateTime @default(now())
+
+  @@index([date])
 }
 
 model ActivityLog {
