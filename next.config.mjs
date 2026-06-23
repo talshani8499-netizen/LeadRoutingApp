@@ -31,10 +31,6 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    // Enables src/instrumentation.ts (env validation + the optional sim ticker).
-    instrumentationHook: true,
-  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

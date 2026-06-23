@@ -5,7 +5,8 @@ import { apiError } from "@/lib/apiError";
 
 export const dynamic = "force-dynamic";
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const parsed = ruleUpdateSchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json(
@@ -14,16 +15,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     );
   }
   try {
-    const rule = await prisma.routingRule.update({ where: { id: params.id }, data: parsed.data });
+    const rule = await prisma.routingRule.update({ where: { id }, data: parsed.data });
     return NextResponse.json({ ok: true, rule });
   } catch (err) {
     return apiError("rules.patch_failed", err);
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   try {
-    await prisma.routingRule.delete({ where: { id: params.id } });
+    await prisma.routingRule.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (err) {
     return apiError("rules.delete_failed", err);
