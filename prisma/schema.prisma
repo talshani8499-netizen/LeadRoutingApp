@@ -152,6 +152,21 @@ model Holiday {
   @@index([date])
 }
 
+// Self-service telephony configuration, editable from Settings -> Telephony.
+// A single row (id = "default"). Values here OVERRIDE the env defaults, so a
+// user can connect their own phone number in the UI without redeploying. The
+// auth token is write-only: it is stored but never returned to the browser.
+model TelephonyConfig {
+  id               String   @id @default("default")
+  provider         String   @default("simulator") // "simulator" | "twilio"
+  twilioAccountSid String?
+  twilioAuthToken  String? // secret — never sent to the client
+  twilioNumber     String?
+  platformCallerId String?
+  publicBaseUrl    String?
+  updatedAt        DateTime @updatedAt
+}
+
 model ActivityLog {
   id      String  @id @default(cuid())
   type    String // ActivityType

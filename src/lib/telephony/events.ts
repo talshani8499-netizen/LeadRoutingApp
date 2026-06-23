@@ -1,7 +1,6 @@
 import type { CallAttempt } from "@prisma/client";
 import type { CallAttemptState } from "@/lib/enums";
 import { prisma } from "@/lib/db";
-import { env } from "@/lib/env";
 import { logActivity } from "@/lib/activity";
 import {
   isTerminal,
@@ -12,7 +11,7 @@ import {
 } from "@/lib/routing/stateMachine";
 import { startAttempt } from "@/lib/routing/engine";
 import { maskPhone } from "@/lib/logger";
-import { getProvider } from "./index";
+import { getProvider, getTelephony } from "./index";
 import type { TelephonyEvent } from "./types";
 
 // The single place where a telephony event mutates persisted call state. Both
@@ -92,12 +91,12 @@ export async function handleTelephonyEvent(e: TelephonyEvent): Promise<void> {
 
 /** Step 6: the agent picked up — immediately call the lead. */
 async function onAgentConnected(attempt: AttemptWithRefs): Promise<void> {
-  const provider = getProvider();
+  const { provider, config } = await getTelephony();
   const { providerCallSid } = await provider.callLead({
     attemptId: attempt.id,
     leg: "lead",
     to: attempt.lead.phone,
-    from: env.platformCallerId,
+    from: config.platformCallerId,
   });
   await prisma.callAttempt.update({
     where: { id: attempt.id },
@@ -119,7 +118,7 @@ async function onBridged(attempt: AttemptWithRefs): Promise<void> {
     where: { id: attempt.id },
     data: { conferenceName, bridgedAt: new Date() },
   });
-  const provider = getProvider();
+  const provider = await getProvider();
   await provider.bridge({
     attemptId: attempt.id,
     agentCallSid: attempt.agentCallSid ?? "",
@@ -224,7 +223,7 @@ async function finalizeAttempt(
 
 async function safeHangup(providerCallSid: string): Promise<void> {
   try {
-    await getProvider().hangup(providerCallSid);
+    await (await getProvider()).hangup(providerCallSid);
   } catch {
     // Hangup is best-effort; ignore provider errors during teardown.
   }

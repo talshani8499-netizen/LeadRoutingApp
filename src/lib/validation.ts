@@ -130,3 +130,22 @@ export const holidayCreateSchema = z.object({
 export const businessHoursUpdateSchema = z.object({
   days: z.array(businessHoursDaySchema).max(7),
 });
+
+// Telephony configuration (Settings -> Telephony). The auth token is optional on
+// update: when omitted/blank the stored token is preserved (never wiped).
+const optStr = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .or(z.literal("").transform(() => undefined));
+
+export const telephonyConfigSchema = z.object({
+  provider: z.enum(["simulator", "twilio"]).default("simulator"),
+  twilioAccountSid: optStr(64),
+  twilioAuthToken: optStr(128),
+  twilioNumber: optStr(20),
+  platformCallerId: optStr(20),
+  publicBaseUrl: optStr(200),
+});

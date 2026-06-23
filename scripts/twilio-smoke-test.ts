@@ -82,7 +82,12 @@ function checkEnv(): void {
 function checkConstructor(): TwilioProvider | null {
   section("2. Provider construction");
   try {
-    const provider = new TwilioProvider();
+    const provider = new TwilioProvider({
+      accountSid: env.twilio.accountSid,
+      authToken: env.twilio.authToken,
+      number: env.twilio.number,
+      publicBaseUrl: env.twilio.publicBaseUrl,
+    });
     pass(`TwilioProvider constructed (name="${provider.name}")`);
     return provider;
   } catch (err) {

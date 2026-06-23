@@ -1,4 +1,4 @@
-import { env } from "@/lib/env";
+import type { TwilioCreds } from "./config";
 import type {
   BridgeParams,
   PlaceCallParams,
@@ -115,11 +115,11 @@ export class TwilioProvider implements TelephonyProvider {
 
   private client: TwilioClient | null = null;
 
-  constructor() {
-    if (!env.twilio.accountSid || !env.twilio.authToken || !env.twilio.number) {
+  constructor(private readonly cfg: TwilioCreds) {
+    if (!cfg.accountSid || !cfg.authToken || !cfg.number) {
       // Surfaced eagerly so misconfiguration fails fast and clearly.
       throw new Error(
-        "Twilio provider selected but TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_NUMBER are missing.",
+        "Twilio provider selected but account SID / auth token / number are missing.",
       );
     }
   }
@@ -134,7 +134,7 @@ export class TwilioProvider implements TelephonyProvider {
     if (this.client) return this.client;
     // @ts-ignore -- optional dependency; resolved at runtime only in twilio mode.
     const twilioLib = (await import("twilio")).default;
-    this.client = twilioLib(env.twilio.accountSid, env.twilio.authToken);
+    this.client = twilioLib(this.cfg.accountSid, this.cfg.authToken);
     return this.client;
   }
 
@@ -171,10 +171,10 @@ export class TwilioProvider implements TelephonyProvider {
   ): Promise<PlaceCallResult> {
     const client = await this.getClient();
     const attemptId = encodeURIComponent(params.attemptId);
-    const base = env.twilio.publicBaseUrl;
+    const base = this.cfg.publicBaseUrl;
     const call = await client.calls.create({
       to: params.to,
-      from: params.from || env.twilio.number,
+      from: params.from || this.cfg.number,
       url: `${base}/api/telephony/twilio/voice?attemptId=${attemptId}&leg=${leg}`,
       statusCallback: `${base}/api/telephony/twilio/status?attemptId=${attemptId}&leg=${leg}`,
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],

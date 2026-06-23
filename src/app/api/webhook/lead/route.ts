@@ -7,6 +7,7 @@ import { dispatchLead } from "@/lib/routing/engine";
 import { leadIntakeSchema, normalizePhone, slugify } from "@/lib/validation";
 import { rateLimit, getClientIp } from "@/lib/rateLimit";
 import { timingSafeEqualStr } from "@/lib/safeCompare";
+import { getTelephonyConfig } from "@/lib/telephony/config";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +123,8 @@ export async function POST(req: NextRequest) {
   // Outbound-call spend caps — toll-fraud defense. Only meaningful when real
   // calls are placed (Twilio); the simulator costs nothing. Caps are DB-backed
   // so they hold across serverless instances.
-  if (env.provider !== "simulator") {
+  const tele = await getTelephonyConfig();
+  if (tele.provider !== "simulator") {
     const now = Date.now();
     const [globalRecent, perDest] = await Promise.all([
       prisma.callAttempt.count({ where: { startedAt: { gte: new Date(now - 60_000) } } }),
