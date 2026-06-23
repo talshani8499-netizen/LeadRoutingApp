@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { runSimTick } from "@/lib/telephony/tick";
-import { env } from "@/lib/env";
+import { getTelephonyConfig } from "@/lib/telephony/config";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 // driven by signed provider webhooks, so this endpoint must not be a usable
 // state-driver in production.
 async function handle() {
-  if (env.provider !== "simulator") {
+  const cfg = await getTelephonyConfig();
+  if (cfg.provider !== "simulator") {
     return NextResponse.json({ ok: true, skipped: "not-simulator" });
   }
   const result = await runSimTick();

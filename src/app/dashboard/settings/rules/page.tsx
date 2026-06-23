@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Badge } from "@/components/Badge";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { strategyLabel } from "@/lib/labels";
 
@@ -76,60 +75,124 @@ export default function RulesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Routing Rules</h1>
-        <p className="text-sm text-slate-500">
-          Evaluated in order (lowest first). The first match for a lead’s source wins. A rule with
-          no source applies to all leads. If a rule requires a skill no available agent has, the
-          lead is marked “No agent available”.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="page-title">Routing Rules</h1>
+          <p className="hint mt-1">
+            Evaluated in order (lowest first). The first match for a lead’s source wins. A rule with
+            no source applies to all leads. If a rule requires a skill no available agent has, the
+            lead is marked “No agent available”.
+          </p>
+        </div>
+        <span className="badge badge-slate">{rules.length} rules</span>
       </div>
 
       {loadError && (
-        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+        <div
+          role="alert"
+          className="badge badge-red flex w-full items-center gap-2 rounded-xl px-4 py-2.5 text-sm"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
           {loadError}
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 card divide-y divide-slate-100">
-          {rules.map((r) => (
-            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
-              <span className="w-8 text-center text-xs font-semibold text-slate-400">{r.order}</span>
-              <div className="flex-1">
-                <div className="font-medium">{r.name}</div>
-                <div className="text-xs text-slate-400">
-                  {r.sourceName ? `source: ${r.sourceName}` : "all sources"} ·{" "}
-                  {strategyLabel[r.strategy]}
-                  {r.requiredSkill ? ` · skill: ${r.requiredSkill}` : ""} · ≤{r.maxAttempts} tries
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <div className="card overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className="t-head px-5 py-3">Order</th>
+                  <th className="t-head px-5 py-3">Rule</th>
+                  <th className="t-head px-5 py-3">Status</th>
+                  <th className="t-head px-5 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((r) => (
+                  <tr key={r.id} className="t-row">
+                    <td className="t-cell">
+                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-500">
+                        {r.order}
+                      </span>
+                    </td>
+                    <td className="t-cell">
+                      <div className="font-medium text-slate-900">{r.name}</div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+                          {r.sourceName ? `source: ${r.sourceName}` : "all sources"}
+                        </span>
+                        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+                          {strategyLabel[r.strategy]}
+                        </span>
+                        {r.requiredSkill && (
+                          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+                            skill: {r.requiredSkill}
+                          </span>
+                        )}
+                        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+                          ≤{r.maxAttempts} tries
+                        </span>
+                      </div>
+                    </td>
+                    <td className="t-cell">
+                      <button
+                        type="button"
+                        onClick={() => patch(r.id, { enabled: !r.enabled })}
+                        aria-pressed={r.enabled}
+                        title={r.enabled ? "Click to disable" : "Click to enable"}
+                        className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-1"
+                      >
+                        <span className={r.enabled ? "badge badge-green" : "badge badge-slate"}>
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${r.enabled ? "bg-emerald-500" : "bg-slate-400"}`}
+                            aria-hidden="true"
+                          />
+                          {r.enabled ? "On" : "Off"}
+                        </span>
+                      </button>
+                    </td>
+                    <td className="t-cell text-right">
+                      <ConfirmButton label="Delete" confirmLabel="Confirm delete?" onConfirm={() => remove(r.id)} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {rules.length === 0 && (
+              <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <line x1="22" y1="6" x2="2" y2="6" />
+                    <line x1="22" y1="12" x2="2" y2="12" />
+                    <line x1="22" y1="18" x2="2" y2="18" />
+                    <circle cx="8" cy="6" r="2" fill="currentColor" stroke="none" />
+                    <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none" />
+                    <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none" />
+                  </svg>
                 </div>
+                <p className="text-sm font-medium text-slate-700">No routing rules yet</p>
+                <p className="hint mt-1 max-w-xs">
+                  Add one to control how leads are matched to agents.
+                </p>
               </div>
-              <button
-                onClick={() => patch(r.id, { enabled: !r.enabled })}
-                aria-pressed={r.enabled}
-                title={r.enabled ? "Click to disable" : "Click to enable"}
-              >
-                <Badge
-                  label={r.enabled ? "On" : "Off"}
-                  cls={r.enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}
-                />
-              </button>
-              <ConfirmButton label="Delete" confirmLabel="Confirm delete?" onConfirm={() => remove(r.id)} />
-            </div>
-          ))}
-          {rules.length === 0 && (
-            <div className="p-5 text-slate-400 text-sm">
-              No routing rules yet — add one to control how leads are matched to agents.
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        <div className="card p-5 h-fit">
-          <h2 className="font-semibold mb-3">Add rule</h2>
+        <div className="panel h-fit">
+          <h2 className="section-title mb-1">Add rule</h2>
+          <p className="hint mb-4">Lower order numbers are evaluated first.</p>
           <form onSubmit={add} className="space-y-3">
             <div>
-              <label className="label">Name</label>
+              <label className="label" htmlFor="rule-name">Name</label>
               <input
+                id="rule-name"
                 className="input"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -138,8 +201,9 @@ export default function RulesPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Order</label>
+                <label className="label" htmlFor="rule-order">Order</label>
                 <input
+                  id="rule-order"
                   type="number"
                   className="input"
                   value={form.order}
@@ -147,8 +211,9 @@ export default function RulesPage() {
                 />
               </div>
               <div>
-                <label className="label">Max attempts</label>
+                <label className="label" htmlFor="rule-max">Max attempts</label>
                 <input
+                  id="rule-max"
                   type="number"
                   className="input"
                   value={form.maxAttempts}
@@ -159,8 +224,9 @@ export default function RulesPage() {
               </div>
             </div>
             <div>
-              <label className="label">Source slug (blank = all)</label>
+              <label className="label" htmlFor="rule-source">Source slug (blank = all)</label>
               <input
+                id="rule-source"
                 className="input"
                 value={form.sourceName}
                 onChange={(e) => setForm({ ...form, sourceName: e.target.value })}
@@ -168,8 +234,9 @@ export default function RulesPage() {
               />
             </div>
             <div>
-              <label className="label">Strategy</label>
+              <label className="label" htmlFor="rule-strategy">Strategy</label>
               <select
+                id="rule-strategy"
                 className="input"
                 value={form.strategy}
                 onChange={(e) => setForm({ ...form, strategy: e.target.value })}
@@ -182,14 +249,20 @@ export default function RulesPage() {
               </select>
             </div>
             <div>
-              <label className="label">Required skill (optional)</label>
+              <label className="label" htmlFor="rule-skill">Required skill (optional)</label>
               <input
+                id="rule-skill"
                 className="input"
                 value={form.requiredSkill}
                 onChange={(e) => setForm({ ...form, requiredSkill: e.target.value })}
               />
+              <p className="hint mt-1">Leads needing this skill route only to matching agents.</p>
             </div>
-            {err && <div className="text-xs text-red-500">{err}</div>}
+            {err && (
+              <div role="alert" className="text-xs text-red-500">
+                {err}
+              </div>
+            )}
             <button className="btn-primary w-full">Add rule</button>
           </form>
         </div>

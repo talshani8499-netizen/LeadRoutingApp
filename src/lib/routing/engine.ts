@@ -1,10 +1,9 @@
 import type { Agent } from "@prisma/client";
 import type { RoutingStrategy } from "@/lib/enums";
 import { prisma } from "@/lib/db";
-import { env } from "@/lib/env";
 import { logActivity } from "@/lib/activity";
 import { logger, maskPhone } from "@/lib/logger";
-import { getProvider } from "@/lib/telephony";
+import { getTelephony } from "@/lib/telephony";
 import { isHoliday, isWithinBusinessHours } from "./businessHours";
 
 export interface RoutingDecision {
@@ -216,12 +215,12 @@ export async function startAttempt(
   // stranded BUSY and the attempt sits in PENDING forever (no event ever
   // advances it).
   try {
-    const provider = getProvider();
+    const { provider, config } = await getTelephony();
     const { providerCallSid } = await provider.callAgent({
       attemptId: attempt.id,
       leg: "agent",
       to: agent.phone,
-      from: env.platformCallerId,
+      from: config.platformCallerId,
     });
     await prisma.callAttempt.update({
       where: { id: attempt.id },

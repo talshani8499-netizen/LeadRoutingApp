@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { runSimTick } from "@/lib/telephony/tick";
 import { env } from "@/lib/env";
+import { getTelephonyConfig } from "@/lib/telephony/config";
 import { ACTIVE_CALL_STATES } from "@/lib/enums";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,8 @@ export const dynamic = "force-dynamic";
 // advances the simulator (unless an in-process ticker is enabled), so simply
 // watching the dashboard drives the call flow forward.
 export async function GET() {
-  if (env.provider === "simulator" && !env.enableSimTicker) {
+  const cfg = await getTelephonyConfig();
+  if (cfg.provider === "simulator" && !env.enableSimTicker) {
     await runSimTick();
   }
 
