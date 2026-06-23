@@ -23,6 +23,11 @@ model Lead {
   notes  String?
   status String  @default("NEW") // LeadStatus
 
+  // Caller-supplied idempotency key. When present, a repeated webhook delivery
+  // with the same externalId is collapsed onto the existing lead instead of
+  // creating a duplicate (and re-placing calls).
+  externalId String?
+
   sourceId String?
   source   LeadSource? @relation(fields: [sourceId], references: [id])
 
@@ -34,6 +39,9 @@ model Lead {
 
   @@index([status])
   @@index([createdAt])
+  @@index([externalId])
+  // Hot path for dedupe + per-destination outbound-call caps.
+  @@index([phone, createdAt])
 }
 
 model Agent {

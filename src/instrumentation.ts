@@ -6,6 +6,12 @@
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  // Validate configuration at boot: warns in dev, throws in production so a
+  // misconfigured deploy fails fast instead of 500ing on the first request.
+  const { validateEnv } = await import("@/lib/env");
+  validateEnv();
+
   if (process.env.ENABLE_SIM_TICKER !== "1") return;
   if (process.env.PROVIDER && process.env.PROVIDER !== "simulator") return;
 

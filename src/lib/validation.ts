@@ -49,6 +49,9 @@ export const leadIntakeSchema = z.object({
   email: z.string().trim().email().optional().or(z.literal("").transform(() => undefined)),
   source: z.string().trim().min(1).max(60).optional(),
   notes: z.string().trim().max(1000).optional(),
+  // Optional idempotency key (e.g. the form/CRM submission id). Repeated
+  // deliveries carrying the same value are deduplicated at intake.
+  externalId: z.string().trim().min(1).max(200).optional(),
 });
 
 export type LeadIntake = z.infer<typeof leadIntakeSchema>;

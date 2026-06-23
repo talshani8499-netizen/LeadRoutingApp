@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 
-// Reuse a single PrismaClient across hot-reloads in dev to avoid exhausting
-// the SQLite connection pool.
+// Reuse a single PrismaClient across hot-reloads in dev AND across warm
+// serverless invocations in prod, to avoid exhausting the DB connection pool.
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
@@ -12,6 +12,6 @@ export const prisma =
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-}
+// Cache unconditionally: a new client per module-eval in serverless would open a
+// fresh connection on every cold start and quickly exhaust Postgres connections.
+globalForPrisma.prisma = prisma;

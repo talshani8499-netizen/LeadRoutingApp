@@ -108,7 +108,6 @@ export function conferenceTwiML(conferenceName: string): string {
 // The twilio SDK has no first-party types we can rely on being installed in the
 // simulator-only build, so the lazily-created client is typed loosely. Params
 // and return values stay strongly typed against TelephonyProvider.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TwilioClient = any;
 
 export class TwilioProvider implements TelephonyProvider {
