@@ -7,12 +7,13 @@ import type {
   TelephonyStatus,
 } from "./types";
 
-// Twilio adapter — wired but intentionally inactive in v1.
+// Twilio adapter — ACTIVE. Implements the same TelephonyProvider interface as
+// the simulator, backed by real Twilio REST calls.
 //
-// This documents exactly how the real provider maps onto the same interface as
-// the simulator. To enable it: install the `twilio` package, set PROVIDER=twilio
-// plus the TWILIO_* env vars and PUBLIC_BASE_URL, and replace the
-// NotImplementedError throws with the (commented) real calls below.
+// To use it: install the `twilio` package, set PROVIDER=twilio plus the TWILIO_*
+// env vars and PUBLIC_BASE_URL. callAgent/callLead place real outbound calls and
+// hangup tears a leg down. The `twilio` SDK is loaded via a dynamic import inside
+// getClient() so the simulator path never needs the package present.
 //
 // === How agent-first call bridging works with Twilio ===
 // 1. callAgent(): create an outbound call to the agent. Its TwiML
@@ -104,19 +105,15 @@ export function conferenceTwiML(conferenceName: string): string {
   ].join("\n");
 }
 
-class NotImplementedError extends Error {
-  constructor(method: string) {
-    super(
-      `TwilioProvider.${method} is not enabled. Set PROVIDER=twilio with valid ` +
-        `TWILIO_* credentials and PUBLIC_BASE_URL, then wire the real twilio client ` +
-        `(see src/lib/telephony/twilio.ts).`,
-    );
-    this.name = "NotImplementedError";
-  }
-}
+// The twilio SDK has no first-party types we can rely on being installed in the
+// simulator-only build, so the lazily-created client is typed loosely. Params
+// and return values stay strongly typed against TelephonyProvider.
+type TwilioClient = any;
 
 export class TwilioProvider implements TelephonyProvider {
   readonly name = "twilio" as const;
+
+  private client: TwilioClient | null = null;
 
   constructor() {
     if (!env.twilio.accountSid || !env.twilio.authToken || !env.twilio.number) {
@@ -127,31 +124,62 @@ export class TwilioProvider implements TelephonyProvider {
     }
   }
 
-  async callAgent(_params: PlaceCallParams): Promise<PlaceCallResult> {
-    // const client = twilio(env.twilio.accountSid, env.twilio.authToken);
-    // const call = await client.calls.create({
-    //   to: _params.to,
-    //   from: env.twilio.number,
-    //   url: `${env.twilio.publicBaseUrl}/api/telephony/twilio/voice?attemptId=${_params.attemptId}&leg=agent`,
-    //   statusCallback: `${env.twilio.publicBaseUrl}/api/telephony/twilio/status?attemptId=${_params.attemptId}&leg=agent`,
-    //   statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
-    // });
-    // return { providerCallSid: call.sid };
-    throw new NotImplementedError("callAgent");
+  /**
+   * Lazily construct and memoize the Twilio client. The SDK is imported
+   * dynamically so the `twilio` package is only required at runtime when this
+   * provider is actually selected — the simulator path never loads it, which
+   * also lets this module typecheck without the package being installed.
+   */
+  private async getClient(): Promise<TwilioClient> {
+    if (this.client) return this.client;
+    // @ts-ignore -- optional dependency; resolved at runtime only in twilio mode.
+    const twilioLib = (await import("twilio")).default;
+    this.client = twilioLib(env.twilio.accountSid, env.twilio.authToken);
+    return this.client;
   }
 
-  async callLead(_params: PlaceCallParams): Promise<PlaceCallResult> {
-    throw new NotImplementedError("callLead");
+  async callAgent(params: PlaceCallParams): Promise<PlaceCallResult> {
+    return this.placeCall(params, "agent");
+  }
+
+  async callLead(params: PlaceCallParams): Promise<PlaceCallResult> {
+    return this.placeCall(params, "lead");
   }
 
   async bridge(_params: BridgeParams): Promise<void> {
     // With the conference approach the bridge is implicit: the lead's voice
-    // TwiML joins the agent's conference room. Nothing extra to call here.
-    throw new NotImplementedError("bridge");
+    // TwiML joins the agent's conference room (see conferenceTwiML). There is
+    // nothing extra to call here, so this is intentionally a no-op.
   }
 
-  async hangup(_providerCallSid: string): Promise<void> {
-    // await client.calls(_providerCallSid).update({ status: "completed" });
-    throw new NotImplementedError("hangup");
+  async hangup(providerCallSid: string): Promise<void> {
+    try {
+      const client = await this.getClient();
+      await client.calls(providerCallSid).update({ status: "completed" });
+    } catch (err) {
+      // Teardown must be idempotent: a leg that already ended (e.g. the other
+      // party hung up) makes Twilio reject the update. Swallow those so callers
+      // can always attempt cleanup without special-casing terminal states.
+      console.error(`TwilioProvider.hangup(${providerCallSid}) ignored error:`, err);
+    }
+  }
+
+  /** Shared implementation for the agent/lead legs — only the `leg` differs. */
+  private async placeCall(
+    params: PlaceCallParams,
+    leg: "agent" | "lead",
+  ): Promise<PlaceCallResult> {
+    const client = await this.getClient();
+    const attemptId = encodeURIComponent(params.attemptId);
+    const base = env.twilio.publicBaseUrl;
+    const call = await client.calls.create({
+      to: params.to,
+      from: params.from || env.twilio.number,
+      url: `${base}/api/telephony/twilio/voice?attemptId=${attemptId}&leg=${leg}`,
+      statusCallback: `${base}/api/telephony/twilio/status?attemptId=${attemptId}&leg=${leg}`,
+      statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
+      statusCallbackMethod: "POST",
+    });
+    return { providerCallSid: call.sid };
   }
 }

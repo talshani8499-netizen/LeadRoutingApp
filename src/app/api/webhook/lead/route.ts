@@ -5,7 +5,8 @@ import { logActivity } from "@/lib/activity";
 import { logger } from "@/lib/logger";
 import { dispatchLead } from "@/lib/routing/engine";
 import { leadIntakeSchema, normalizePhone, slugify } from "@/lib/validation";
-import { rateLimit } from "@/lib/rateLimit";
+import { rateLimit, getClientIp } from "@/lib/rateLimit";
+import { timingSafeEqualStr } from "@/lib/safeCompare";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,11 @@ export const dynamic = "force-dynamic";
 // webhook, validate it, persist it, and kick off routing.
 //
 // This endpoint is public, so it is the platform's main abuse surface (spam,
-// and toll-fraud amplification once Twilio places real calls). It is protected
-// by a coarse per-IP rate limit and an optional shared secret.
+// and toll-fraud amplification once Twilio places real calls). Defenses:
+//   - an optional shared secret (constant-time compared),
+//   - a per-IP rate limit (Redis-backed when configured),
+//   - idempotency/dedupe so retried deliveries don't create duplicate calls,
+//   - outbound-call spend caps before any real call is placed.
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
 
@@ -23,14 +27,15 @@ export async function POST(req: NextRequest) {
   if (env.leadWebhookSecret) {
     const supplied =
       req.headers.get("x-webhook-secret") ?? req.nextUrl.searchParams.get("token") ?? "";
-    if (supplied !== env.leadWebhookSecret) {
+    if (!timingSafeEqualStr(supplied, env.leadWebhookSecret)) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
   }
 
-  // Per-IP rate limit: 30 leads / minute.
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const rl = rateLimit(`webhook:${ip}`, 30, 60_000);
+  // Per-IP rate limit: 30 leads / minute. The IP is resolved defensively so a
+  // client can't mint a fresh bucket by spoofing X-Forwarded-For (see getClientIp).
+  const ip = getClientIp(req.headers);
+  const rl = await rateLimit(`webhook:${ip}`, 30, 60_000);
   if (!rl.ok) {
     return NextResponse.json(
       { ok: false, error: "Rate limit exceeded" },
@@ -53,6 +58,7 @@ export async function POST(req: NextRequest) {
     );
   }
   const data = parsed.data;
+  const phone = normalizePhone(data.phone);
 
   let lead;
   try {
@@ -68,12 +74,30 @@ export async function POST(req: NextRequest) {
       sourceId = source.id;
     }
 
+    // Idempotency: collapse duplicate deliveries so retries don't create
+    // duplicate leads (and duplicate outbound calls). Prefer an explicit
+    // externalId; otherwise treat the same (phone, source) within 60s as a dup.
+    const existing = data.externalId
+      ? await prisma.lead.findFirst({ where: { externalId: data.externalId } })
+      : await prisma.lead.findFirst({
+          where: { phone, sourceId: sourceId ?? null, createdAt: { gte: new Date(Date.now() - 60_000) } },
+          orderBy: { createdAt: "desc" },
+        });
+    if (existing) {
+      logger.info("webhook.lead.deduped", { requestId, leadId: existing.id });
+      return NextResponse.json(
+        { ok: true, leadId: existing.id, deduped: true },
+        { status: 200 },
+      );
+    }
+
     lead = await prisma.lead.create({
       data: {
         name: data.name,
-        phone: normalizePhone(data.phone),
+        phone,
         email: data.email,
         notes: data.notes,
+        externalId: data.externalId,
         sourceId,
         status: "NEW",
       },
@@ -93,6 +117,34 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     logger.error("webhook.lead.persist_failed", { requestId, error: errMessage(err) });
     return NextResponse.json({ ok: false, error: "Could not save lead" }, { status: 500 });
+  }
+
+  // Outbound-call spend caps — toll-fraud defense. Only meaningful when real
+  // calls are placed (Twilio); the simulator costs nothing. Caps are DB-backed
+  // so they hold across serverless instances.
+  if (env.provider !== "simulator") {
+    const now = Date.now();
+    const [globalRecent, perDest] = await Promise.all([
+      prisma.callAttempt.count({ where: { startedAt: { gte: new Date(now - 60_000) } } }),
+      prisma.callAttempt.count({
+        where: { startedAt: { gte: new Date(now - 3_600_000) }, lead: { phone } },
+      }),
+    ]);
+    if (
+      globalRecent >= env.callCaps.globalPerMin ||
+      perDest >= env.callCaps.perDestinationPerHour
+    ) {
+      logger.warn("webhook.lead.call_capped", { requestId, leadId: lead.id, globalRecent, perDest });
+      await logActivity({
+        type: "ROUTING_FAILED",
+        message: "No routing: outbound-call cap reached",
+        leadId: lead.id,
+      });
+      return NextResponse.json(
+        { ok: true, leadId: lead.id, routed: false, reason: "rate-capped" },
+        { status: 201 },
+      );
+    }
   }
 
   // Fire routing. Wrapped so a routing/provider failure returns a controlled

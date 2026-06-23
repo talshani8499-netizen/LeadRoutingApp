@@ -5,7 +5,8 @@ import { apiError } from "@/lib/apiError";
 
 export const dynamic = "force-dynamic";
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const parsed = agentUpdateSchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json(
@@ -16,18 +17,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const data = { ...parsed.data };
   if (data.phone) data.phone = normalizePhone(data.phone);
   try {
-    const agent = await prisma.agent.update({ where: { id: params.id }, data });
+    const agent = await prisma.agent.update({ where: { id }, data });
     return NextResponse.json({ ok: true, agent });
   } catch (err) {
     return apiError("agents.patch_failed", err);
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   // Soft delete: deactivate so historical call attempts remain intact.
   try {
     const agent = await prisma.agent.update({
-      where: { id: params.id },
+      where: { id },
       data: { active: false, status: "OFFLINE" },
     });
     return NextResponse.json({ ok: true, agent });

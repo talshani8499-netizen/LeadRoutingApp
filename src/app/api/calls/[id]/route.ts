@@ -4,9 +4,10 @@ import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 // Single call attempt with its full activity timeline.
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const attempt = await prisma.callAttempt.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       lead: true,
       agent: true,
