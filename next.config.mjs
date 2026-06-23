@@ -31,20 +31,18 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // The Twilio SDK is Node-only and is imported lazily at runtime, only in
+  // PROVIDER=twilio server route handlers. Keep it external to the Node.js
+  // server bundle so it's required natively where it runs.
+  //
+  // IMPORTANT: do NOT do this via a global webpack `externals` entry — that also
+  // injects a `twilio` reference into the Edge middleware bundle and fails the
+  // build with: Edge Function "src/middleware" is referencing unsupported
+  // modules: twilio. `serverExternalPackages` applies to the Node.js runtime
+  // ONLY and leaves the Edge runtime (middleware) completely untouched.
+  serverExternalPackages: ["twilio"],
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
-  },
-  webpack: (config) => {
-    // The Twilio SDK is a Node-only package, loaded lazily at runtime and only in
-    // server route handlers (PROVIDER=twilio). Mark it external so webpack never
-    // bundles it — bundling pulls in Node built-ins (crypto via jsonwebtoken)
-    // that break the Edge build. It's required natively where it actually runs.
-    if (Array.isArray(config.externals)) {
-      config.externals.push({ twilio: "commonjs twilio" });
-    } else {
-      config.externals = [config.externals, { twilio: "commonjs twilio" }].filter(Boolean);
-    }
-    return config;
   },
 };
 
