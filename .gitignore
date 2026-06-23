@@ -28,6 +28,8 @@ yarn-error.log*
 /prisma/*.db-journal
 /prisma/dev.db
 /prisma/migrations/dev.db
+# generated Postgres schema (built from schema.prisma for prod deploys)
+/prisma/schema.prod.prisma
 
 # typescript
 *.tsbuildinfo

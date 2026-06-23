@@ -175,61 +175,51 @@ serverless ergonomics and are willing to do the Postgres + Upstash swap below.
 
 These were flagged by the functionality, security, and prod-readiness review passes.
 
-**1) Move off SQLite to Postgres** (mandatory on Vercel; recommended everywhere)
-- `prisma/schema.prisma`: `datasource db { provider = "postgresql" }`.
-- Use a hosted Postgres: **Neon**, **Vercel Postgres**, or **Supabase**.
-- Use a **pooled** connection (PgBouncer / Neon pooler / Prisma Accelerate) — serverless
-  opens many short-lived connections.
-- The string-enum columns port as-is (they're already plain `String`).
+**1) Database — Postgres (operator step; tooling is built in).** ✅ The committed
+schema stays SQLite so local dev/tests/the demo run with zero config; the build
+auto-generates a **PostgreSQL** Prisma client whenever `DATABASE_URL` is a
+`postgres(ql)://` URL — one source of truth (`prisma/schema.prisma`), no manual edits
+(`scripts/prisma-prepare.mjs` + `scripts/build-prisma-schema.mjs`). To stand up prod:
+- Provision hosted Postgres (**Neon**, **Vercel Postgres**, or **Supabase**) and use a
+  **pooled** connection string (PgBouncer / Neon pooler / Prisma Accelerate).
+- Create the tables: `DATABASE_URL=<postgres-url> npm run db:push:prod`
+  (optionally `npm run db:seed:prod`). _Verified: the generated Postgres schema
+  validates and `next build` compiles against a Postgres `DATABASE_URL`._
 
-**2) Adopt real migrations** (today the project only uses `prisma db push`)
-- Generate an initial migration and run `prisma migrate deploy` on release:
-  ```bash
-  npx prisma migrate dev --name init      # once, locally, to create migrations/
-  # release step:
-  npx prisma migrate deploy
-  ```
-- Without this, a fresh prod DB has **no tables** and every query 500s.
+**2) Migrations (optional upgrade over `db push`).** `db:push:prod` creates the schema
+directly (fine for an MVP). For migration history, create a `migrations/` folder
+(`prisma migrate dev --name init`) and run `npm run db:migrate:prod`
+(= `prisma migrate deploy` against the generated Postgres schema) on release.
 
-**3) Externalize the rate limiter** (`src/lib/rateLimit.ts`)
-- Replace the in-memory `Map` with **Upstash Redis** (or a WAF/provider limit).
-- On multi-instance/serverless the in-memory limit is per-instance and resets on cold
-  start, so the toll-fraud brake on the public webhook is effectively absent.
+**3) Rate limiter — set Upstash (operator step).** ✅ The limiter already uses Upstash
+Redis when `UPSTASH_REDIS_REST_URL`/`_TOKEN` are set (bounded in-memory fallback
+otherwise). Provision an Upstash database and set those two vars.
 
-**4) Make the Prisma client a singleton in prod** (`src/lib/db.ts:15`)
-- Currently cached on `globalThis` only when `NODE_ENV !== "production"`. Cache it
-  unconditionally to avoid connection exhaustion.
+**4) Already implemented:** ✅ Prisma client cached in prod (`src/lib/db.ts`),
+✅ boot-time env validation that refuses to boot on misconfig (`validateEnv`),
+✅ security headers (`next.config.mjs`), ✅ `error.tsx`/`global-error.tsx`/`not-found.tsx`,
+✅ Next.js 15 (advisories cleared).
 
-**5) Add boot-time env validation** (`src/lib/env.ts`)
-- Validate with zod at startup; **fail fast** if `PROVIDER=twilio` but `TWILIO_*` /
-  `PUBLIC_BASE_URL` are missing, and assert `DATABASE_URL`. Today a misconfigured deploy
-  boots "healthy" and only 500s on the first call.
-
-**6) Add security headers** (`next.config.mjs`)
-- Add an `async headers()` block: `Strict-Transport-Security`, `X-Frame-Options: DENY`,
-  `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, and a CSP.
-
-**7) Add error/҂not-found boundaries**
-- Create `src/app/error.tsx`, `src/app/global-error.tsx`, `src/app/not-found.tsx` so a
-  render error shows a recovery UI instead of a bare "Application error".
-
-**8) Pin `PUBLIC_BASE_URL`** to the canonical production domain (Part A) — Vercel preview
+**5) Pin `PUBLIC_BASE_URL`** to the canonical production domain (Part A) — Vercel preview
 URLs change per deploy and will break Twilio signature verification.
 
-**9) Turn the security controls ON** (they default to OFF — see Part C).
+**6) Turn the security controls ON** — set `DASHBOARD_PASSWORD` and (in Twilio mode)
+`LEAD_WEBHOOK_SECRET`. In production the app now **refuses to boot** without them.
 
 ### B.3 Deploying on Vercel (step-by-step)
 
-1. Provision Postgres (Neon/Vercel Postgres) and apply changes B.2/1, B.2/2.
-2. Provision Upstash Redis and swap the rate limiter (B.2/3).
+1. Provision Postgres (Neon/Vercel Postgres) and run `DATABASE_URL=<url> npm run db:push:prod`.
+2. Provision Upstash Redis (note the REST URL + token).
 3. In **Vercel → Project → Settings → Environment Variables**, set:
-   `DATABASE_URL` (pooled), `PROVIDER`, `TWILIO_ACCOUNT_SID/AUTH_TOKEN/NUMBER`,
+   `DATABASE_URL` (pooled Postgres), `PROVIDER=twilio`, `TWILIO_ACCOUNT_SID/AUTH_TOKEN/NUMBER`,
    `PUBLIC_BASE_URL` (= your prod domain), `PLATFORM_CALLER_ID`, `DASHBOARD_PASSWORD`,
-   `LEAD_WEBHOOK_SECRET`, `UPSTASH_REDIS_*`. **Do not** set `ENABLE_SIM_TICKER`.
-4. Build command stays `prisma generate && next build`; add `prisma migrate deploy` to a
-   release/post-deploy step.
+   `LEAD_WEBHOOK_SECRET`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`. **Do not**
+   set `ENABLE_SIM_TICKER`.
+4. Build command stays the default `npm run build` — it detects the Postgres
+   `DATABASE_URL` and generates the matching Prisma client automatically.
 5. Point your number's Twilio config / `calls.create` at `https://<prod-domain>/api/telephony/twilio/*`.
-6. Deploy; smoke-test the webhook + a real call; confirm the dashboard requires auth.
+6. Deploy; smoke-test the webhook + a real call; confirm the dashboard requires auth and
+   `npm run twilio:check` passes.
 
 ### B.4 Deploying as a single container (simplest for telephony)
 

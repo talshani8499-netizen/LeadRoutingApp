@@ -4,13 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "node scripts/prisma-prepare.mjs && next build",
     "start": "next start",
     "lint": "next lint",
     "db:push": "prisma db push",
-    "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
+    "prisma:prod:schema": "node scripts/build-prisma-schema.mjs",
+    "db:push:prod": "node scripts/build-prisma-schema.mjs && prisma db push --schema prisma/schema.prod.prisma",
+    "db:migrate:prod": "node scripts/build-prisma-schema.mjs && prisma migrate deploy --schema prisma/schema.prod.prisma",
+    "db:seed:prod": "node scripts/build-prisma-schema.mjs && prisma generate --schema prisma/schema.prod.prisma && tsx prisma/seed.ts",
     "twilio:check": "tsx scripts/twilio-smoke-test.ts",
     "test": "vitest run"
   },
