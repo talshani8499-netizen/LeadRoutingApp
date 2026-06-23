@@ -68,9 +68,10 @@ async function main() {
   }
 
   // --- Business hours ---
-  // Seeded as always-open (00:00–24:00, all 7 days) so the happy-flow demo
-  // works the moment you install. Tighten these in Settings → Business Hours
-  // to exercise the "outside business hours" routing branch.
+  // Seeded as effectively always-open (00:00–23:59, all 7 days) so the
+  // happy-flow demo works the moment you install. 23:59 (not 24:00) so the
+  // value round-trips cleanly through the time picker. Tighten these in
+  // Settings → Business Hours to exercise the "outside hours" routing branch.
   for (let day = 0; day <= 6; day++) {
     await prisma.businessHours.upsert({
       where: { dayOfWeek: day },
@@ -78,7 +79,7 @@ async function main() {
       create: {
         dayOfWeek: day,
         openMinute: 0,
-        closeMinute: 1440,
+        closeMinute: 1439,
         enabled: true,
         timezone: "UTC",
       },

@@ -1,8 +1,8 @@
-import type { BusinessHours } from "@prisma/client";
+import type { BusinessHours, Holiday } from "@prisma/client";
 
 // Determine whether a given instant falls inside configured business hours.
-// Business hours rows are keyed by day-of-week with open/close minutes from
-// midnight in the row's timezone.
+// Supports overnight windows (closeMinute <= openMinute wraps past midnight),
+// honors each row's own timezone, and accounts for holidays (closed dates).
 
 export interface BusinessHoursCheck {
   open: boolean;
@@ -44,10 +44,31 @@ export function localDayAndMinute(
   return { dayOfWeek, minuteOfDay: hour * 60 + minute };
 }
 
+/** Local calendar date parts (year/month/day) for an instant in a timezone. */
+export function localDateParts(
+  now: Date,
+  timezone: string,
+): { year: number; month: number; day: number } {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = fmt.formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  return { year: get("year"), month: get("month"), day: get("day") };
+}
+
 /**
  * Returns whether `now` is within business hours given the configured rows.
  * If no hours are configured at all, the business is treated as always open
  * (so a fresh install can route immediately).
+ *
+ * Each row is evaluated in its own timezone. A row whose closeMinute is less
+ * than or equal to its openMinute is an overnight window that wraps past
+ * midnight (e.g. 22:00–02:00), covering the evening of its own day and the
+ * early morning of the next day.
  */
 export function isWithinBusinessHours(
   now: Date,
@@ -57,20 +78,52 @@ export function isWithinBusinessHours(
     return { open: true, reason: "no-hours-configured" };
   }
 
-  // All rows share a timezone in this MVP; use the first row's tz.
-  const timezone = hours[0].timezone || "UTC";
-  const { dayOfWeek, minuteOfDay } = localDayAndMinute(now, timezone);
+  for (const row of hours) {
+    if (!row.enabled) continue;
+    const { dayOfWeek, minuteOfDay } = localDayAndMinute(now, row.timezone || "UTC");
+    const overnight = row.closeMinute <= row.openMinute;
 
-  const today = hours.find((h) => h.dayOfWeek === dayOfWeek);
-  if (!today || !today.enabled) {
-    return { open: false, reason: "closed-today" };
+    if (!overnight) {
+      if (
+        dayOfWeek === row.dayOfWeek &&
+        minuteOfDay >= row.openMinute &&
+        minuteOfDay < row.closeMinute
+      ) {
+        return { open: true, reason: "within-hours" };
+      }
+    } else {
+      // Evening portion (open → midnight) on the row's own day…
+      if (dayOfWeek === row.dayOfWeek && minuteOfDay >= row.openMinute) {
+        return { open: true, reason: "within-hours" };
+      }
+      // …and the early-morning spillover (midnight → close) on the next day.
+      if (dayOfWeek === (row.dayOfWeek + 1) % 7 && minuteOfDay < row.closeMinute) {
+        return { open: true, reason: "within-hours" };
+      }
+    }
   }
 
-  const open = minuteOfDay >= today.openMinute && minuteOfDay < today.closeMinute;
-  return {
-    open,
-    reason: open ? "within-hours" : "outside-hours",
-  };
+  return { open: false, reason: "outside-hours" };
+}
+
+/** Is `now` (in the business timezone) a configured holiday? */
+export function isHoliday(
+  now: Date,
+  holidays: Holiday[],
+  timezone: string,
+): { holiday: boolean; name?: string } {
+  if (holidays.length === 0) return { holiday: false };
+  const { year, month, day } = localDateParts(now, timezone || "UTC");
+
+  for (const h of holidays) {
+    const [hy, hm, hd] = h.date.split("-").map((n) => parseInt(n, 10));
+    if (h.recurring) {
+      if (hm === month && hd === day) return { holiday: true, name: h.name };
+    } else if (hy === year && hm === month && hd === day) {
+      return { holiday: true, name: h.name };
+    }
+  }
+  return { holiday: false };
 }
 
 /** Render minutes-from-midnight as HH:MM for display. */

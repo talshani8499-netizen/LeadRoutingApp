@@ -105,12 +105,24 @@ export const businessHoursDaySchema = z
     enabled: boolish,
     timezone: z.string().trim().min(1).max(60).default("UTC"),
   })
-  // An enabled day must have a positive-length window; otherwise the day would
-  // silently evaluate as closed all day. (Overnight windows aren't supported.)
-  .refine((d) => !d.enabled || d.openMinute < d.closeMinute, {
-    message: "Opening time must be before closing time",
+  // An enabled day needs a non-zero-length window. Open and close may be in
+  // either order — when close <= open the window is treated as overnight
+  // (wraps past midnight). Equal values are rejected as ambiguous.
+  .refine((d) => !d.enabled || d.openMinute !== d.closeMinute, {
+    message: "Opening and closing time cannot be the same",
     path: ["closeMinute"],
   });
+
+// Holidays (closed dates)
+export const holidayCreateSchema = z.object({
+  date: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+    .refine((v) => !Number.isNaN(Date.parse(v)), "Not a valid date"),
+  name: z.string().trim().min(1).max(120),
+  recurring: boolish.default(false),
+});
 
 export const businessHoursUpdateSchema = z.object({
   days: z.array(businessHoursDaySchema).max(7),

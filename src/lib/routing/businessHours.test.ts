@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import type { BusinessHours } from "@prisma/client";
+import type { BusinessHours, Holiday } from "@prisma/client";
 import {
   hhmmToMinutes,
+  isHoliday,
   isWithinBusinessHours,
   localDayAndMinute,
   minutesToHHMM,
@@ -17,6 +18,17 @@ function row(partial: Partial<BusinessHours>): BusinessHours {
     timezone: "UTC",
     ...partial,
   } as BusinessHours;
+}
+
+function holiday(partial: Partial<Holiday>): Holiday {
+  return {
+    id: "h",
+    date: "2026-12-25",
+    name: "Test",
+    recurring: false,
+    createdAt: new Date(),
+    ...partial,
+  } as Holiday;
 }
 
 describe("localDayAndMinute", () => {
@@ -79,5 +91,55 @@ describe("isWithinBusinessHours", () => {
     const now = new Date("2026-06-14T10:00:00Z"); // Sunday
     const hours = [row({ dayOfWeek: 1 })]; // only Monday configured
     expect(isWithinBusinessHours(now, hours).open).toBe(false);
+  });
+
+  it("supports overnight windows across midnight", () => {
+    // Monday 22:00 – 02:00 window (close <= open => overnight).
+    const hours = [row({ dayOfWeek: 1, openMinute: 22 * 60, closeMinute: 2 * 60 })];
+    // Monday 23:00 — evening portion, open.
+    expect(isWithinBusinessHours(new Date("2026-06-15T23:00:00Z"), hours).open).toBe(true);
+    // Tuesday 01:00 — early-morning spillover, open.
+    expect(isWithinBusinessHours(new Date("2026-06-16T01:00:00Z"), hours).open).toBe(true);
+    // Tuesday 03:00 — after close, closed.
+    expect(isWithinBusinessHours(new Date("2026-06-16T03:00:00Z"), hours).open).toBe(false);
+    // Monday 20:00 — before open, closed.
+    expect(isWithinBusinessHours(new Date("2026-06-15T20:00:00Z"), hours).open).toBe(false);
+  });
+
+  it("evaluates each row in its own timezone", () => {
+    // 14:00 UTC on Monday is 09:00 in New York (EDT). A NY 09:00–17:00 Monday
+    // window should be open; the same instant is afternoon in UTC.
+    const nyHours = [row({ dayOfWeek: 1, openMinute: 540, closeMinute: 1020, timezone: "America/New_York" })];
+    expect(isWithinBusinessHours(new Date("2026-06-15T14:00:00Z"), nyHours).open).toBe(true);
+    // 02:00 UTC Monday is still Sunday 22:00 in NY — closed (Sunday unconfigured).
+    expect(isWithinBusinessHours(new Date("2026-06-15T02:00:00Z"), nyHours).open).toBe(false);
+  });
+});
+
+describe("isHoliday", () => {
+  it("matches an exact non-recurring date in the business timezone", () => {
+    const now = new Date("2026-12-25T12:00:00Z");
+    const res = isHoliday(now, [holiday({ date: "2026-12-25", name: "Christmas" })], "UTC");
+    expect(res.holiday).toBe(true);
+    expect(res.name).toBe("Christmas");
+  });
+
+  it("does not match a different year for a non-recurring holiday", () => {
+    const now = new Date("2027-12-25T12:00:00Z");
+    expect(isHoliday(now, [holiday({ date: "2026-12-25" })], "UTC").holiday).toBe(false);
+  });
+
+  it("matches any year for a recurring holiday (month/day only)", () => {
+    const now = new Date("2030-12-25T12:00:00Z");
+    expect(
+      isHoliday(now, [holiday({ date: "2000-12-25", name: "Xmas", recurring: true })], "UTC").holiday,
+    ).toBe(true);
+  });
+
+  it("uses the business timezone to resolve the local date", () => {
+    // 2026-12-26T02:00Z is still Dec 25 in New York.
+    const now = new Date("2026-12-26T02:00:00Z");
+    expect(isHoliday(now, [holiday({ date: "2026-12-25" })], "America/New_York").holiday).toBe(true);
+    expect(isHoliday(now, [holiday({ date: "2026-12-25" })], "UTC").holiday).toBe(false);
   });
 });
