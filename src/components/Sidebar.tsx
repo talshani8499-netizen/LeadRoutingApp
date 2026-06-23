@@ -12,7 +12,8 @@ type IconName =
   | "sources"
   | "rules"
   | "hours"
-  | "telephony";
+  | "telephony"
+  | "demo";
 
 function Icon({ name }: { name: IconName }) {
   const common = {
@@ -88,6 +89,13 @@ function Icon({ name }: { name: IconName }) {
           <path d="M11 18h2" />
         </svg>
       );
+    case "demo":
+      return (
+        <svg {...common}>
+          <path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7L12 3z" />
+          <path d="M5 15.5l.8 2.2 2.2.8-2.2.8L5 21.5l-.8-2.2L2 18.5l2.2-.8L5 15.5z" />
+        </svg>
+      );
   }
 }
 
@@ -100,6 +108,7 @@ const nav: { href: string; label: string; icon: IconName }[] = [
 
 const settings: { href: string; label: string; icon: IconName }[] = [
   { href: "/dashboard/settings/telephony", label: "Telephony", icon: "telephony" },
+  { href: "/dashboard/settings/demo", label: "Demo Data", icon: "demo" },
   { href: "/dashboard/settings/sources", label: "Lead Sources", icon: "sources" },
   { href: "/dashboard/settings/rules", label: "Routing Rules", icon: "rules" },
   { href: "/dashboard/settings/hours", label: "Business Hours", icon: "hours" },
