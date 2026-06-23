@@ -13,6 +13,32 @@ or webhooks — only the adapter and a few env vars change.
 
 ---
 
+## Status — what this branch already implements
+
+Most of the hardening below has now been built and verified (tsc, 45/45 tests,
+lint, `next build`, and runtime smoke all green):
+
+- ✅ **Twilio adapter activated** — `callAgent`/`callLead`/`hangup` wired (lazy
+  dynamic import); `npm run twilio:check` validates config + signatures safely.
+- ✅ **Fail-closed auth** — in production, protected routes are denied (and the
+  server refuses to boot via `validateEnv`) unless `DASHBOARD_PASSWORD` is set.
+- ✅ **Webhook hardened** — constant-time secret compare, less-spoofable client
+  IP, idempotency (`externalId` + 60s `(phone, source)` dedupe), and
+  outbound-call **spend caps** (global/min + per-destination/hour).
+- ✅ **Rate limiter** — Upstash Redis backend when configured (serverless-safe),
+  bounded in-memory fallback.
+- ✅ **Security headers** — CSP, HSTS, X-Frame-Options, nosniff, Referrer/Permissions.
+- ✅ **Boot-time env validation**, **prod Prisma singleton**, `/api/telephony/sim/tick`
+  gated, error/not-found boundaries, ESLint configured, activity `leadId` filter fixed.
+- ✅ **Next.js upgraded 14 → 15.5** — clears all Next runtime advisories.
+
+**Still required for a real production deploy (operator steps, below):**
+provision **Postgres** (replace SQLite) + **Upstash**, set the env vars/secrets,
+add `prisma migrate deploy`, and pin `PUBLIC_BASE_URL`. Multi-tenant accounts/RBAC
+remain future work (the auth gate is a single shared password).
+
+---
+
 ## Part A — Connect a real / existing virtual phone number
 
 ### A.0 How the calling actually works (so the config makes sense)
@@ -230,30 +256,26 @@ URLs change per deploy and will break Twilio signature verification.
 
 ---
 
-## Part C — Security must-fixes before public exposure
+## Part C — Security status & remaining items
 
-The full audit is summarized in the chat brief; these are the blockers. **All security
-controls currently default to OFF**, so a default deploy has no auth and an open,
-call-placing webhook.
+The audit's blockers have largely been implemented on this branch. **The controls
+still default to OFF for the local demo, but production now fails closed** (the
+server won't boot without `DASHBOARD_PASSWORD`, and a real-call deploy requires
+`LEAD_WEBHOOK_SECRET`).
 
-1. **Fail-closed auth.** Today the dashboard + all admin APIs are unauthenticated unless
-   `DASHBOARD_PASSWORD` is set (`src/middleware.ts`). For production: refuse to boot (or
-   deny by default) when no auth is configured, and plan real accounts + per-tenant scoping
-   before multi-customer use.
-2. **Lock down the call-placing webhook** (`src/app/api/webhook/lead/route.ts`). It triggers
-   real outbound calls to attacker-supplied numbers → toll-fraud/robo-dial. Require
-   `LEAD_WEBHOOK_SECRET` whenever `PROVIDER!=simulator`, and add **global + per-destination
-   outbound-call caps and a daily spend ceiling**.
-3. **Fix the rate-limit key + store.** It keys on the spoofable `X-Forwarded-For` left value
-   and is in-memory. Derive the IP from the trusted proxy hop and move to Redis (B.2/3).
-4. **Constant-time secret compare** for `LEAD_WEBHOOK_SECRET` (the webhook uses `!==`;
-   the dashboard and Twilio paths already use constant-time — reuse that).
-5. **Add idempotency/dedupe** on lead intake (e.g. an `externalId` or short-window
-   `(phone, source)` key) so retried/replayed webhooks don't create duplicate leads & calls.
-6. **Security headers** (B.2/6).
-7. **Upgrade Next.js** off `14.2.35` (open DoS / App-Router advisories from `npm audit`).
-8. **Gate `/api/telephony/sim/tick`** (a public simulator-progression endpoint) and keep
-   Twilio signature checks always-on.
+| # | Item | Status |
+|---|------|--------|
+| 1 | Fail-closed auth (deny + refuse-boot when no `DASHBOARD_PASSWORD` in prod) | ✅ done (`src/middleware.ts`, `validateEnv`) |
+| 2 | Lock down call-placing webhook: required secret in Twilio mode + outbound-call caps | ✅ done (`webhook/lead`, `env.callCaps`) — set a **daily spend ceiling in Twilio** too |
+| 3 | Rate-limit: less-spoofable IP + shared Redis store | ✅ done (`rateLimit.ts`, Upstash when configured) |
+| 4 | Constant-time webhook-secret compare | ✅ done (`safeCompare.ts`) |
+| 5 | Webhook idempotency/dedupe | ✅ done (`externalId` + `(phone, source)` window) |
+| 6 | Security headers (CSP, HSTS, frame-ancestors, …) | ✅ done (`next.config.mjs`) |
+| 7 | Upgrade Next.js off 14.2.x advisories | ✅ done (→ 15.5; 0 Next advisories) |
+| 8 | Gate `/api/telephony/sim/tick`; keep Twilio signature checks always-on | ✅ tick gated; signature check verified |
+| 9 | **Multi-tenant accounts + RBAC** (the gate is one shared password) | ⬜ future work |
+| 10 | **Set a Twilio account spend limit / alerts** as a backstop to the app caps | ⬜ operator step |
+| 11 | Tighten CSP to nonces (currently allows `unsafe-inline`/`unsafe-eval`) | ⬜ hardening follow-up |
 
 ---
 
