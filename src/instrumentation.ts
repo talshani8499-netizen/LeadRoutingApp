@@ -1,28 +1,15 @@
-// Optional in-process simulator ticker. When ENABLE_SIM_TICKER=1, this advances
-// the simulator once a second so the call flow progresses even when nobody is
-// watching the dashboard. Single-container only — do not enable behind a
-// multi-instance/serverless deployment. When disabled (the default), the
-// simulation advances on dashboard polls instead.
-
+// Next.js instrumentation entry. This module is compiled for BOTH the Node.js
+// and Edge runtimes, so it must not statically (or via an unconditional dynamic
+// import) pull Node-only code into the Edge bundle. The telephony stack reaches
+// the Twilio SDK, which needs Node's `crypto` — bundling that into Edge fails the
+// build ("Edge Function is referencing unsupported modules: twilio").
+//
+// So all Node-only work lives in ./instrumentation-node and is imported ONLY when
+// running on Node. Next.js evaluates `process.env.NEXT_RUNTIME` at build time, so
+// in the Edge build this branch is dead code and the import (with its telephony/
+// Twilio dependencies) is excluded entirely.
 export async function register() {
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
-
-  // Validate configuration at boot: warns in dev, throws in production so a
-  // misconfigured deploy fails fast instead of 500ing on the first request.
-  const { validateEnv } = await import("@/lib/env");
-  validateEnv();
-
-  if (process.env.ENABLE_SIM_TICKER !== "1") return;
-  if (process.env.PROVIDER && process.env.PROVIDER !== "simulator") return;
-
-  const { runSimTick } = await import("@/lib/telephony/tick");
-
-  const globalForTicker = globalThis as unknown as { simTicker?: NodeJS.Timeout };
-  if (globalForTicker.simTicker) return; // avoid duplicate timers on reload
-
-  globalForTicker.simTicker = setInterval(() => {
-    runSimTick().catch((err) => console.error("[sim-ticker]", err));
-  }, 1000);
-
-  console.log("[sim-ticker] enabled (1s interval)");
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    await import("./instrumentation-node");
+  }
 }
