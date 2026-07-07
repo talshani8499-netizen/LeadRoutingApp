@@ -171,6 +171,17 @@ model TelephonyConfig {
   updatedAt        DateTime @updatedAt
 }
 
+// Self-service form-connection settings (Settings -> Connect Forms). Singleton
+// row (id = "default"). defaultSource labels leads that arrive with no source;
+// fieldMap is a JSON object of { "theirFieldName": "name" | "phone" | ... } that
+// maps arbitrary inbound field names onto canonical lead fields.
+model FormConfig {
+  id            String   @id @default("default")
+  defaultSource String?
+  fieldMap      String? // JSON object of custom field aliases
+  updatedAt     DateTime @updatedAt
+}
+
 model ActivityLog {
   id      String  @id @default(cuid())
   type    String // ActivityType

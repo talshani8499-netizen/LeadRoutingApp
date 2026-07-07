@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { logActivity } from "@/lib/activity";
 import { logger, maskPhone } from "@/lib/logger";
 import { getTelephony } from "@/lib/telephony";
+import { slugify } from "@/lib/validation";
 import { isHoliday, isWithinBusinessHours } from "./businessHours";
 
 export interface RoutingDecision {
@@ -129,6 +130,73 @@ export async function routeLead(
     reason: agent ? "agent-selected" : "no-eligible-agent",
     strategy,
     maxAttempts,
+  };
+}
+
+export interface RoutingPreview {
+  wouldRoute: boolean;
+  reason: string;
+  strategy: RoutingStrategy;
+  businessOpen: boolean;
+  sourceEnabled: boolean;
+  sourceKnown: boolean;
+  eligibleCount: number;
+  agent: { id: string; name: string } | null;
+}
+
+/**
+ * Evaluate the routing rules for a hypothetical lead from `sourceName` WITHOUT
+ * creating a lead or placing a call — the read-only twin of routeLead(), used by
+ * the Connect Forms test console to show where a submission would go.
+ */
+export async function previewRouting(sourceName?: string): Promise<RoutingPreview> {
+  const now = new Date();
+  const hours = await prisma.businessHours.findMany();
+  const businessTz = hours[0]?.timezone ?? "UTC";
+  const holidays = await prisma.holiday.findMany();
+  const holiday = isHoliday(now, holidays, businessTz).holiday;
+  const businessOpen = !holiday && isWithinBusinessHours(now, hours).open;
+
+  const slug = sourceName?.trim() ? slugify(sourceName) : null;
+  const source = slug ? await prisma.leadSource.findUnique({ where: { name: slug } }) : null;
+  const sourceEnabled = source ? source.enabled : true;
+
+  let strategy: RoutingStrategy = (source?.routingStrategy as RoutingStrategy) ?? "ROUND_ROBIN";
+  let requiredSkill: string | null = source?.requiredSkill ?? null;
+
+  const rules = await prisma.routingRule.findMany({
+    where: { enabled: true },
+    orderBy: { order: "asc" },
+  });
+  const rule = rules.find((r) => r.sourceName === source?.name || r.sourceName == null);
+  if (rule) {
+    strategy = rule.strategy as RoutingStrategy;
+    requiredSkill = rule.requiredSkill ?? requiredSkill;
+  }
+
+  const candidates = await prisma.agent.findMany({ where: { active: true, status: "AVAILABLE" } });
+  const eligible = candidates.filter((a) => hasSkill(a, requiredSkill));
+  const agent = businessOpen && sourceEnabled ? pickAgent(strategy, eligible) : null;
+
+  const reason = !businessOpen
+    ? holiday
+      ? "holiday"
+      : "outside-business-hours"
+    : !sourceEnabled
+      ? "source-disabled"
+      : !agent
+        ? "no-eligible-agent"
+        : "agent-selected";
+
+  return {
+    wouldRoute: Boolean(agent),
+    reason,
+    strategy,
+    businessOpen,
+    sourceEnabled,
+    sourceKnown: Boolean(source),
+    eligibleCount: eligible.length,
+    agent: agent ? { id: agent.id, name: agent.name } : null,
   };
 }
 

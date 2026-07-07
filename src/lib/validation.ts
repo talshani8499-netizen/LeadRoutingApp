@@ -149,3 +149,25 @@ export const telephonyConfigSchema = z.object({
   platformCallerId: optStr(20),
   publicBaseUrl: optStr(200),
 });
+
+// Connect Forms config. fieldMap maps the user's own field names to canonical
+// lead fields.
+const canonicalField = z.enum(["name", "phone", "email", "source", "notes", "externalId"]);
+
+export const formsConfigSchema = z.object({
+  defaultSource: optStr(60),
+  fieldMap: z
+    .record(z.string().trim().min(1).max(80), canonicalField)
+    .refine((m) => Object.keys(m).length <= 40, "Too many field mappings")
+    .optional()
+    .default({}),
+});
+
+// Payload for the Connect Forms test console. Either structured `fields` or a
+// `rawBody` + `contentType` to parse exactly as the webhook would.
+export const formTestSchema = z.object({
+  mode: z.enum(["dry", "live"]).default("dry"),
+  fields: z.record(z.string(), z.string()).optional(),
+  rawBody: z.string().max(20_000).optional(),
+  contentType: z.string().max(120).optional(),
+});
