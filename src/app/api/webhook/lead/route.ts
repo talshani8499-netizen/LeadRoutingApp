@@ -3,11 +3,13 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { logActivity } from "@/lib/activity";
 import { logger } from "@/lib/logger";
-import { dispatchLead } from "@/lib/routing/engine";
+import { dispatchLead, previewRouting } from "@/lib/routing/engine";
 import { leadIntakeSchema, normalizePhone, slugify } from "@/lib/validation";
 import { rateLimit, getClientIp } from "@/lib/rateLimit";
 import { timingSafeEqualStr } from "@/lib/safeCompare";
 import { getTelephonyConfig } from "@/lib/telephony/config";
+import { parseInboundBody, mapLeadFields } from "@/lib/leadIntake";
+import { getFormsConfig } from "@/lib/forms/config";
 
 export const dynamic = "force-dynamic";
 
@@ -44,14 +46,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+  // Parse the body (JSON / x-www-form-urlencoded / multipart) and map arbitrary
+  // form field names onto our canonical fields (built-in aliases + custom map).
+  const raw = await parseInboundBody(req);
+  const formsCfg = await getFormsConfig();
+  const mapped = mapLeadFields(raw, formsCfg.fieldMap);
+  if (mapped.source === undefined && formsCfg.defaultSource) {
+    mapped.source = formsCfg.defaultSource;
   }
 
-  const parsed = leadIntakeSchema.safeParse(body);
+  const parsed = leadIntakeSchema.safeParse(mapped);
+
+  // Dry-run: validate + preview routing WITHOUT creating a lead or dialing.
+  const dryRun =
+    req.nextUrl.searchParams.get("dryRun") === "1" || req.headers.get("x-dry-run") === "1";
+  if (dryRun) {
+    return NextResponse.json({
+      ok: parsed.success,
+      dryRun: true,
+      raw,
+      mapped,
+      validation: parsed.success
+        ? { ok: true }
+        : { ok: false, errors: parsed.error.flatten().fieldErrors },
+      routingPreview: parsed.success ? await previewRouting(parsed.data.source) : null,
+    });
+  }
+
   if (!parsed.success) {
     return NextResponse.json(
       { ok: false, error: "Validation failed", details: parsed.error.flatten() },
